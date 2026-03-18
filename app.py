@@ -384,36 +384,48 @@ if template_file and list_file:
     st.markdown("### 批量生成")
     if st.button("开始生成全部", type="primary", use_container_width=True):
         progress = st.progress(0, text="准备中...")
-        zip_buf = io.BytesIO()
         total = len(rows)
         preview_imgs = []
+        all_img_data = []
 
-        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for i, row in enumerate(rows):
-                company = row[company_field]
-                name = row[name_field]
-                img = generate_one(bg, font, company, name,
-                                   company_y, name_y, img_width, font_color)
-                if i < 3:
-                    preview_imgs.append((img.copy(), f"{company}_{name}"))
+        for i, row in enumerate(rows):
+            company = row[company_field]
+            name = row[name_field]
+            img = generate_one(bg, font, company, name,
+                               company_y, name_y, img_width, font_color)
+            if i < 5:
+                preview_imgs.append((img.copy(), f"{company}_{name}"))
 
-                img_buf = io.BytesIO()
-                img.save(img_buf, format="PNG")
-                zf.writestr(f"{company}_{name}.png", img_buf.getvalue())
-                progress.progress((i + 1) / total, text=f"正在生成 [{i+1}/{total}] {company}_{name}")
+            img_buf = io.BytesIO()
+            img.save(img_buf, format="PNG")
+            all_img_data.append((f"{company}_{name}.png", img_buf.getvalue()))
+            progress.progress((i + 1) / total, text=f"正在生成 [{i+1}/{total}] {company}_{name}")
 
-        progress.progress(1.0, text=f"全部完成！共 {total} 张")
+        progress.progress(1.0, text=f"全部完成! 共 {total} 张")
         st.balloons()
 
+        st.markdown("#### 生成效果预览 (前5张)")
         if preview_imgs:
-            st.markdown("#### 生成效果预览")
-            cols = st.columns(len(preview_imgs))
-            for col, (img, caption) in zip(cols, preview_imgs):
-                with col:
+            row1 = st.columns(min(len(preview_imgs), 3))
+            for idx, (img, caption) in enumerate(preview_imgs[:3]):
+                with row1[idx]:
                     st.image(img, caption=caption, use_container_width=True)
+            if len(preview_imgs) > 3:
+                row2 = st.columns(len(preview_imgs) - 3)
+                for idx, (img, caption) in enumerate(preview_imgs[3:]):
+                    with row2[idx]:
+                        st.image(img, caption=caption, use_container_width=True)
+
+        st.markdown("---")
+        st.markdown("**确认效果无误后, 点击下方按钮打包下载:**")
+
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for filename, data in all_img_data:
+                zf.writestr(filename, data)
 
         st.download_button(
-            label=f"下载全部 ({total} 张 ZIP)",
+            label=f"确认并下载全部 ({total} 张 ZIP)",
             data=zip_buf.getvalue(),
             file_name="邀请函批量生成.zip",
             mime="application/zip",

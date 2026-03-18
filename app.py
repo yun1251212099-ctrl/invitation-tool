@@ -156,14 +156,28 @@ def replace_qr(background, qr_image, qr_box, corner_radius=5):
     return background
 
 
-def get_font_info(psd):
+def get_font_info(psd, font_path=None):
+    """Extract font size (auto-calibrated) and color from PSD text layers."""
     for l in psd.descendants():
         if l.kind == "type":
             ss = l.engine_dict["StyleRun"]["RunArray"][0]["StyleSheet"]["StyleSheetData"]
-            size = ss.get("FontSize", 51)
+            raw_size = ss.get("FontSize", 51)
             color_vals = ss.get("FillColor", {}).get("Values", [1.0, 1.0, 1.0, 1.0])
             rgba = tuple(int(v * 255) for v in color_vals)
-            return size, rgba
+
+            if font_path and l.width > 0 and len(l.text) >= 2:
+                try:
+                    test_font = ImageFont.truetype(font_path, int(raw_size))
+                    bbox = test_font.getbbox(l.text)
+                    pillow_w = bbox[2] - bbox[0]
+                    if pillow_w > 0:
+                        scale = l.width / pillow_w
+                        calibrated = int(raw_size * scale)
+                        return calibrated, rgba
+                except Exception:
+                    pass
+
+            return int(raw_size), rgba
     return 51, (255, 255, 255, 255)
 
 
@@ -287,7 +301,7 @@ if template_file and list_file:
             text_layers = get_text_layers(psd)
             layer_names = [l.name for l in text_layers]
             positions = get_text_layer_positions(psd)
-            font_size, font_color = get_font_info(psd)
+            font_size, font_color = get_font_info(psd, str(FONTS_DIR / "OPPOSans4.ttf"))
             qr_box = detect_qr_region(psd)
             original_img = psd.composite()
             bg = composite_background(psd)

@@ -309,20 +309,47 @@ if template_file and list_file:
 
     # ── font selection ──
     st.markdown("### 字体选择")
-    all_fonts = scan_fonts()
-    font_names = list(all_fonts.keys())
-    default_idx = 0
-    for i, name in enumerate(font_names):
-        if "OPPO Sans 4.0" in name:
-            default_idx = i
-            break
-    selected_font = st.selectbox(
-        "选择字体",
-        font_names,
-        index=default_idx,
-        help=f"已扫描到 {len(font_names)} 个可用字体",
+
+    custom_font_file = st.file_uploader(
+        "上传自定义字体（可选，支持 .ttf / .otf）",
+        type=["ttf", "otf"],
+        help="不上传则使用默认字体 OPPO Sans 4.0",
     )
-    font_path = all_fonts[selected_font]
+
+    if custom_font_file:
+        font_tmp = tempfile.NamedTemporaryFile(suffix=file_suffix(custom_font_file), delete=False)
+        font_tmp.write(custom_font_file.getvalue())
+        font_tmp.flush()
+        font_path = font_tmp.name
+        try:
+            family, style = ImageFont.truetype(font_path, 20).getname()
+            st.success(f"已加载自定义字体：{family} ({style})")
+        except Exception as e:
+            st.error(f"字体文件无法加载: {e}")
+            font_path = get_default_font_path()
+    else:
+        all_fonts = scan_fonts()
+        font_names = list(all_fonts.keys())
+        if font_names:
+            default_idx = 0
+            for i, name in enumerate(font_names):
+                if "OPPO Sans 4.0" in name:
+                    default_idx = i
+                    break
+            selected_font = st.selectbox(
+                "或从已有字体中选择",
+                font_names,
+                index=default_idx,
+                help=f"已扫描到 {len(font_names)} 个可用字体",
+            )
+            font_path = all_fonts[selected_font]
+        else:
+            font_path = get_default_font_path()
+            if font_path:
+                st.info("使用默认字体 OPPO Sans 4.0")
+            else:
+                st.error("未找到任何可用字体，请上传 .ttf 字体文件")
+                st.stop()
 
     if not is_psd:
         fcol1, fcol2 = st.columns(2)

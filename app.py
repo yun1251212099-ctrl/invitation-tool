@@ -22,16 +22,24 @@ st.set_page_config(page_title="批量邀请函生成", page_icon="📨", layout=
 st.title("批量邀请函生成工具")
 
 # ── password gate ────────────────────────────────────────
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
+import hashlib
+_PASS = "950621"
+_TOKEN = hashlib.sha256(_PASS.encode()).hexdigest()[:16]
 
-if not st.session_state.authenticated:
-    pwd = st.text_input("请输入访问密码", type="password")
-    if pwd == "950621":
+_authenticated = False
+if st.query_params.get("token") == _TOKEN:
+    _authenticated = True
+elif st.session_state.get("authenticated"):
+    _authenticated = True
+
+if not _authenticated:
+    pwd = st.text_input("\u8bf7\u8f93\u5165\u8bbf\u95ee\u5bc6\u7801", type="password")
+    if pwd == _PASS:
         st.session_state.authenticated = True
+        st.query_params["token"] = _TOKEN
         st.rerun()
     elif pwd:
-        st.error("密码错误")
+        st.error("\u5bc6\u7801\u9519\u8bef")
     st.stop()
 
 PSD_EXTENSIONS = (".psd", ".psb")

@@ -1,0 +1,11 @@
+.DS_Store
+__pycache__/
+*.pyc
+.ngrok_domain
+启动工具.command
+首次配置.command
+邀请函.PSD
+invite_list.csv
+需要替换的二维码.png
+匹配示意图.png
+邀请函批量调整说明.md

@@ -1,0 +1,7 @@
+streamlit
+psd-tools
+Pillow
+pandas
+numpy
+openpyxl
+xlrd

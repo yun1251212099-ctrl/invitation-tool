@@ -8,6 +8,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -182,12 +183,48 @@ def draw_centered_text(draw, font, text, y, img_width, color):
     draw.text((x, y), text, font=font, fill=color)
 
 
-def generate_one(background, font, company, name, company_y, name_y, img_width, color):
+def generate_one(background, font, text_items, img_width, color):
+    """text_items: list of (text_str, y_pos) to draw, skips None/empty."""
     img = background.copy()
     draw = ImageDraw.Draw(img)
-    draw_centered_text(draw, font, company, company_y, img_width, color)
-    draw_centered_text(draw, font, name, name_y, img_width, color)
+    for text, y in text_items:
+        if text:
+            draw_centered_text(draw, font, text, y, img_width, color)
     return img
+
+
+def check_image_quality(img, font, text_items, img_width, has_qr_box):
+    """Run quality checks on a generated image, return list of (level, message)."""
+    issues = []
+
+    for text, y in text_items:
+        if not text:
+            continue
+        bbox = font.getbbox(text)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+        x = (img_width - text_w) // 2
+        if x < 0:
+            issues.append(("error", f"\u6587\u5b57\u300c{text}\u300d\u8d85\u51fa\u56fe\u7247\u5bbd\u5ea6, \u5efa\u8bae\u7f29\u5c0f\u5b57\u53f7"))
+        elif x < 20:
+            issues.append(("warning", f"\u6587\u5b57\u300c{text}\u300d\u8ddd\u8fb9\u7f18\u592a\u8fd1 ({x}px), \u53ef\u80fd\u663e\u793a\u4e0d\u5b8c\u6574"))
+        if y < 0 or y + text_h > img.size[1]:
+            issues.append(("error", f"\u6587\u5b57\u300c{text}\u300d\u5782\u76f4\u4f4d\u7f6e\u8d85\u51fa\u56fe\u7247\u8303\u56f4 (y={y})"))
+
+    if has_qr_box:
+        try:
+            arr = np.array(img.convert("RGB"))
+            detector = cv2.QRCodeDetector()
+            data, bbox, _ = detector.detectAndDecode(arr)
+            if not data:
+                issues.append(("warning", "\u4e8c\u7ef4\u7801\u65e0\u6cd5\u8bc6\u522b, \u8bf7\u68c0\u67e5\u56fe\u7247\u6e05\u6670\u5ea6"))
+        except Exception:
+            issues.append(("info", "\u4e8c\u7ef4\u7801\u68c0\u6d4b\u8df3\u8fc7"))
+
+    if not issues:
+        issues.append(("success", "\u68c0\u67e5\u901a\u8fc7, \u672a\u53d1\u73b0\u95ee\u9898"))
+
+    return issues
 
 
 def parse_spreadsheet(uploaded):
@@ -224,19 +261,19 @@ st.markdown("---")
 col1, col2 = st.columns(2)
 with col1:
     template_file = st.file_uploader(
-        "Step 1: Upload Template / \u4e0a\u4f20\u6a21\u677f",
+        "1. \u4e0a\u4f20\u6a21\u677f\u6587\u4ef6",
         type=ALL_TEMPLATE_TYPES,
         help="PSD / PSB / PNG / JPG / TIFF / BMP / WebP / PDF / EPS / AI",
     )
 with col2:
     list_file = st.file_uploader(
-        "Step 2: Upload List / \u4e0a\u4f20\u540d\u5355",
+        "2. \u4e0a\u4f20\u540d\u5355",
         type=LIST_EXTENSIONS,
         help="CSV / Excel (.xlsx) / Excel (.xls)",
     )
 
 qr_file = st.file_uploader(
-    "Step 3: Upload QR Code / \u4e0a\u4f20\u65b0QR\u7801 (Optional)",
+    "3. \u4e0a\u4f20\u66ff\u6362\u4e8c\u7ef4\u7801 (\u53ef\u9009)",
     type=["png", "jpg", "jpeg", "webp"],
 )
 
@@ -282,33 +319,79 @@ if template_file and list_file:
     info_parts.append(f"名单共 {len(rows)} 条记录")
     st.success(f"解析完成：{'，'.join(info_parts)}")
 
-    # ── field mapping ──
-    st.markdown("### 字段映射")
-    mcol1, mcol2 = st.columns(2)
-    with mcol1:
-        company_field = st.selectbox("公司名对应字段", fields, index=0)
-    with mcol2:
-        name_idx = min(1, len(fields) - 1)
-        name_field = st.selectbox("人名对应字段", fields, index=name_idx)
+    # ── auto-detect fields ──
+    COMPANY_KEYWORDS = ["company", "\u516c\u53f8", "\u5355\u4f4d", "\u673a\u6784", "\u4f01\u4e1a", "\u7ec4\u7ec7"]
+    NAME_KEYWORDS = ["name", "\u59d3\u540d", "\u4eba\u540d", "\u79f0\u547c", "\u540d\u5b57"]
 
-    if is_psd and layer_names:
-        lcol1, lcol2 = st.columns(2)
-        with lcol1:
-            company_layer = st.selectbox("公司名对应 PSD 图层", layer_names,
-                                         index=max(0, len(layer_names) - 1))
-        with lcol2:
-            name_layer = st.selectbox("人名对应 PSD 图层", layer_names, index=0)
-        company_y = positions[company_layer][1]
-        name_y = positions[name_layer][1]
-    else:
-        st.markdown("**文字位置设置** (图片模板需手动指定 Y 坐标)")
-        pcol1, pcol2 = st.columns(2)
-        default_company_y = int(img_height * 0.45)
-        default_name_y = int(img_height * 0.48)
-        with pcol1:
-            company_y = st.number_input("公司名 Y 坐标", 0, img_height, default_company_y)
-        with pcol2:
-            name_y = st.number_input("人名 Y 坐标", 0, img_height, default_name_y)
+    def auto_detect_field(fields, keywords):
+        for i, f in enumerate(fields):
+            for kw in keywords:
+                if kw in f.lower():
+                    return i
+        return None
+
+    def auto_detect_layer(layer_names, keywords):
+        for i, name in enumerate(layer_names):
+            for kw in keywords:
+                if kw in name.lower():
+                    return i
+        return None
+
+    company_idx = auto_detect_field(fields, COMPANY_KEYWORDS)
+    name_idx = auto_detect_field(fields, NAME_KEYWORDS)
+    has_company_field = company_idx is not None
+    has_name_field = name_idx is not None
+
+    psd_company_layer_idx = auto_detect_layer(layer_names, COMPANY_KEYWORDS) if is_psd else None
+    psd_name_layer_idx = auto_detect_layer(layer_names, NAME_KEYWORDS) if is_psd else None
+
+    # ── field mapping UI ──
+    st.markdown("### \u5b57\u6bb5\u6620\u5c04")
+
+    if has_company_field and has_name_field:
+        st.info(f"\u5df2\u81ea\u52a8\u8bc6\u522b: \u516c\u53f8\u540d=\u300c{fields[company_idx]}\u300d, \u4eba\u540d=\u300c{fields[name_idx]}\u300d")
+    elif has_name_field and not has_company_field:
+        st.info(f"\u5df2\u81ea\u52a8\u8bc6\u522b: \u4eba\u540d=\u300c{fields[name_idx]}\u300d (\u672a\u68c0\u6d4b\u5230\u516c\u53f8\u540d\u5b57\u6bb5)")
+    elif has_company_field and not has_name_field:
+        st.info(f"\u5df2\u81ea\u52a8\u8bc6\u522b: \u516c\u53f8\u540d=\u300c{fields[company_idx]}\u300d (\u672a\u68c0\u6d4b\u5230\u4eba\u540d\u5b57\u6bb5)")
+
+    enable_company = st.checkbox("\u542f\u7528\u516c\u53f8\u540d", value=has_company_field)
+    enable_name = st.checkbox("\u542f\u7528\u4eba\u540d", value=has_name_field)
+
+    if not enable_company and not enable_name:
+        st.warning("\u81f3\u5c11\u9700\u8981\u542f\u7528\u4e00\u4e2a\u5b57\u6bb5")
+        st.stop()
+
+    company_field = None
+    company_y = 0
+    name_field = None
+    name_y = 0
+
+    if enable_company:
+        mcol1, mcol2 = st.columns(2) if enable_name else [st.container(), None]
+        with mcol1:
+            company_field = st.selectbox(
+                "\u516c\u53f8\u540d\u5bf9\u5e94\u5b57\u6bb5", fields,
+                index=company_idx if company_idx is not None else 0)
+            if is_psd and layer_names:
+                cl_idx = psd_company_layer_idx if psd_company_layer_idx is not None else max(0, len(layer_names) - 1)
+                company_layer = st.selectbox("\u516c\u53f8\u540d\u5bf9\u5e94 PSD \u56fe\u5c42", layer_names, index=cl_idx)
+                company_y = positions[company_layer][1]
+            else:
+                company_y = st.number_input("\u516c\u53f8\u540d Y \u5750\u6807", 0, img_height, int(img_height * 0.45))
+
+    if enable_name:
+        col_ctx = mcol2 if (enable_company and mcol2 is not None) else st.container()
+        with col_ctx:
+            name_field = st.selectbox(
+                "\u4eba\u540d\u5bf9\u5e94\u5b57\u6bb5", fields,
+                index=name_idx if name_idx is not None else min(1, len(fields) - 1))
+            if is_psd and layer_names:
+                nl_idx = psd_name_layer_idx if psd_name_layer_idx is not None else 0
+                name_layer = st.selectbox("\u4eba\u540d\u5bf9\u5e94 PSD \u56fe\u5c42", layer_names, index=nl_idx)
+                name_y = positions[name_layer][1]
+            else:
+                name_y = st.number_input("\u4eba\u540d Y \u5750\u6807", 0, img_height, int(img_height * 0.48))
 
     # ── font selection ──
     st.markdown("### 字体选择")
@@ -370,70 +453,132 @@ if template_file and list_file:
 
     font = ImageFont.truetype(font_path, int(font_size))
 
-    # ── preview ──
-    st.markdown("### 预览对比")
+    def build_text_items(row):
+        items = []
+        if enable_company and company_field:
+            items.append((row[company_field], company_y))
+        if enable_name and name_field:
+            items.append((row[name_field], name_y))
+        return items
+
+    def build_filename(row):
+        parts = []
+        if enable_company and company_field:
+            parts.append(row[company_field])
+        if enable_name and name_field:
+            parts.append(row[name_field])
+        return "_".join(parts) if parts else f"row"
+
+    # ── preview: original vs first ──
+    st.markdown("### \u9884\u89c8\u5bf9\u6bd4")
     first = rows[0]
-    preview = generate_one(bg, font, first[company_field], first[name_field],
-                           company_y, name_y, img_width, font_color)
+    preview = generate_one(bg, font, build_text_items(first), img_width, font_color)
 
     pcol1, pcol2 = st.columns(2)
     with pcol1:
-        st.image(original_img, caption="原始模板", use_container_width=True)
+        st.image(original_img, caption="\u539f\u59cb\u6a21\u677f", use_container_width=True)
     with pcol2:
-        st.image(preview, caption=f"替换效果：{first[company_field]} — {first[name_field]}",
+        st.image(preview, caption=f"\u66ff\u6362\u6548\u679c: {build_filename(first)}",
                  use_container_width=True)
 
-    # ── batch generate ──
-    st.markdown("### 批量生成")
-    if st.button("开始生成全部", type="primary", use_container_width=True):
-        progress = st.progress(0, text="准备中...")
-        total = len(rows)
+    # ── step 1: preview samples ──
+    st.markdown("### \u751f\u6210\u9884\u89c8")
+    total = len(rows)
+    preview_count = st.radio(
+        "\u9009\u62e9\u9884\u89c8\u6570\u91cf",
+        [5, 10],
+        horizontal=True,
+        format_func=lambda x: f"\u9884\u89c8\u524d {x} \u5f20",
+    )
+    preview_count = min(preview_count, total)
+
+    if st.button("\u751f\u6210\u9884\u89c8", type="secondary", use_container_width=True):
         preview_imgs = []
-        all_img_data = []
+        all_issues = []
+        progress = st.progress(0, text="\u6b63\u5728\u751f\u6210\u9884\u89c8...")
+        for i in range(preview_count):
+            row = rows[i]
+            text_items = build_text_items(row)
+            img = generate_one(bg, font, text_items, img_width, font_color)
+            fname = build_filename(row)
+            issues = check_image_quality(img, font, text_items, img_width, qr_box is not None)
+            preview_imgs.append((img.copy(), fname))
+            all_issues.append((fname, issues))
+            progress.progress((i + 1) / preview_count,
+                              text=f"\u9884\u89c8 [{i+1}/{preview_count}]")
+        progress.progress(1.0, text=f"\u9884\u89c8\u5b8c\u6210! \u5171 {preview_count} \u5f20")
+        st.session_state["preview_imgs"] = preview_imgs
+        st.session_state["preview_issues"] = all_issues
 
-        for i, row in enumerate(rows):
-            company = row[company_field]
-            name = row[name_field]
-            img = generate_one(bg, font, company, name,
-                               company_y, name_y, img_width, font_color)
-            if i < 5:
-                preview_imgs.append((img.copy(), f"{company}_{name}"))
-
-            img_buf = io.BytesIO()
-            img.save(img_buf, format="PNG")
-            all_img_data.append((f"{company}_{name}.png", img_buf.getvalue()))
-            progress.progress((i + 1) / total, text=f"正在生成 [{i+1}/{total}] {company}_{name}")
-
-        progress.progress(1.0, text=f"全部完成! 共 {total} 张")
-        st.balloons()
-
-        st.markdown("#### 生成效果预览 (前5张)")
-        if preview_imgs:
-            row1 = st.columns(min(len(preview_imgs), 3))
-            for idx, (img, caption) in enumerate(preview_imgs[:3]):
-                with row1[idx]:
+    if "preview_imgs" in st.session_state and st.session_state["preview_imgs"]:
+        preview_imgs = st.session_state["preview_imgs"]
+        for i in range(0, len(preview_imgs), 3):
+            chunk = preview_imgs[i:i+3]
+            cols = st.columns(len(chunk))
+            for col, (img, caption) in zip(cols, chunk):
+                with col:
                     st.image(img, caption=caption, use_container_width=True)
-            if len(preview_imgs) > 3:
-                row2 = st.columns(len(preview_imgs) - 3)
-                for idx, (img, caption) in enumerate(preview_imgs[3:]):
-                    with row2[idx]:
-                        st.image(img, caption=caption, use_container_width=True)
+
+        # ── quality check report ──
+        if "preview_issues" in st.session_state:
+            st.markdown("---")
+            st.markdown("#### \u8d28\u91cf\u7b5b\u67e5\u62a5\u544a")
+            has_problems = False
+            for fname, issues in st.session_state["preview_issues"]:
+                for level, msg in issues:
+                    if level == "error":
+                        st.error(f"**{fname}**: {msg}")
+                        has_problems = True
+                    elif level == "warning":
+                        st.warning(f"**{fname}**: {msg}")
+                        has_problems = True
+                    elif level == "success":
+                        pass
+            if not has_problems:
+                st.success("\u5168\u90e8\u68c0\u67e5\u901a\u8fc7! \u6587\u5b57\u5bf9\u9f50\u6b63\u5e38, \u4e8c\u7ef4\u7801\u53ef\u8bc6\u522b")
 
         st.markdown("---")
-        st.markdown("**确认效果无误后, 点击下方按钮打包下载:**")
-
-        zip_buf = io.BytesIO()
-        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for filename, data in all_img_data:
-                zf.writestr(filename, data)
-
-        st.download_button(
-            label=f"确认并下载全部 ({total} 张 ZIP)",
-            data=zip_buf.getvalue(),
-            file_name="邀请函批量生成.zip",
-            mime="application/zip",
-            type="primary",
-            use_container_width=True,
+        st.markdown("**\u67e5\u770b\u539f\u56fe\u6bd4\u4f8b\u5927\u56fe:**")
+        selected_preview = st.selectbox(
+            "\u9009\u62e9\u67e5\u770b\u5927\u56fe",
+            range(len(preview_imgs)),
+            format_func=lambda i: preview_imgs[i][1],
         )
+        st.image(preview_imgs[selected_preview][0],
+                 caption=f"\u539f\u56fe\u6bd4\u4f8b: {preview_imgs[selected_preview][1]}",
+                 use_container_width=False)
+
+        # ── step 2: confirm and generate all ──
+        st.markdown("---")
+        st.markdown("### \u786e\u8ba4\u5e76\u6253\u5305")
+        if st.button(f"\u786e\u8ba4\u65e0\u8bef, \u751f\u6210\u5168\u90e8 {total} \u5f20\u5e76\u6253\u5305",
+                     type="primary", use_container_width=True):
+            progress2 = st.progress(0, text="\u6b63\u5728\u751f\u6210...")
+            all_img_data = []
+            for i, row in enumerate(rows):
+                fname = build_filename(row)
+                img = generate_one(bg, font, build_text_items(row), img_width, font_color)
+                img_buf = io.BytesIO()
+                img.save(img_buf, format="PNG")
+                all_img_data.append((f"{fname}.png", img_buf.getvalue()))
+                progress2.progress((i + 1) / total,
+                                   text=f"\u6b63\u5728\u751f\u6210 [{i+1}/{total}] {fname}")
+
+            progress2.progress(1.0, text=f"\u5168\u90e8\u5b8c\u6210! \u5171 {total} \u5f20")
+            st.balloons()
+
+            zip_buf = io.BytesIO()
+            with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                for filename, data in all_img_data:
+                    zf.writestr(filename, data)
+
+            st.download_button(
+                label=f"\u4e0b\u8f7d\u5168\u90e8 ({total} \u5f20 ZIP)",
+                data=zip_buf.getvalue(),
+                file_name="\u9080\u8bf7\u51fd\u6279\u91cf\u751f\u6210.zip",
+                mime="application/zip",
+                type="primary",
+                use_container_width=True,
+            )
 else:
-    st.info("Please upload template and list files first / \u8bf7\u5148\u4e0a\u4f20\u6a21\u677f\u548c\u540d\u5355\u6587\u4ef6")
+    st.info("\u8bf7\u5148\u4e0a\u4f20\u6a21\u677f\u6587\u4ef6\u548c\u540d\u5355\u6587\u4ef6")

@@ -183,18 +183,22 @@ def get_font_info(psd, font_path=None):
 
 
 def get_text_layer_positions(psd):
+    """Return {layer_name: (center_x, center_y)} using the layer's vertical center."""
     positions = {}
     for l in psd.descendants():
         if l.kind == "type":
             cx = (l.left + l.right) // 2
-            positions[l.name] = (cx, l.top)
+            cy = (l.top + l.bottom) // 2
+            positions[l.name] = (cx, cy)
     return positions
 
 
-def draw_centered_text(draw, font, text, y, img_width, color):
+def draw_centered_text(draw, font, text, center_y, img_width, color):
+    """Draw text horizontally centered and vertically centered at center_y."""
     bbox = font.getbbox(text)
     text_w = bbox[2] - bbox[0]
     x = (img_width - text_w) // 2
+    y = center_y - (bbox[1] + bbox[3]) // 2
     draw.text((x, y), text, font=font, fill=color)
 
 
@@ -212,23 +216,20 @@ def check_image_quality(img, font, text_items, img_width, qr_box):
     """Run quality checks on a generated image, return list of (level, message)."""
     issues = []
 
-    for text, y in text_items:
+    for text, center_y in text_items:
         if not text:
             continue
         bbox = font.getbbox(text)
         text_w = bbox[2] - bbox[0]
         text_h = bbox[3] - bbox[1]
         x = (img_width - text_w) // 2
+        draw_y = center_y - (bbox[1] + bbox[3]) // 2
         if x < 0:
             issues.append(("error", "\u6587\u5b57\u8d85\u51fa\u56fe\u7247\u5bbd\u5ea6, \u5efa\u8bae\u7f29\u5c0f\u5b57\u53f7"))
         elif x < 20:
             issues.append(("warning", f"\u6587\u5b57\u8ddd\u8fb9\u7f18\u592a\u8fd1 ({x}px)"))
-        if y < 0 or y + text_h > img.size[1]:
-            issues.append(("error", f"\u6587\u5b57\u5782\u76f4\u4f4d\u7f6e\u8d85\u51fa\u56fe\u7247\u8303\u56f4 (y={y})"))
-        center_x = x + text_w // 2
-        offset = abs(center_x - img_width // 2)
-        if offset > 3:
-            issues.append(("warning", f"\u6587\u5b57\u672a\u5c45\u4e2d, \u504f\u79fb{offset}px"))
+        if draw_y < 0 or draw_y + text_h > img.size[1]:
+            issues.append(("error", "\u6587\u5b57\u5782\u76f4\u4f4d\u7f6e\u8d85\u51fa\u56fe\u7247\u8303\u56f4"))
 
     if qr_box:
         try:

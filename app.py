@@ -158,7 +158,7 @@ def replace_qr(background, qr_image, qr_box, corner_radius=3):
 
 
 def get_font_info(psd, font_path=None):
-    """Extract font size (auto-calibrated) and color from PSD text layers."""
+    """Extract height-matched font size, per-char tracking, and color from PSD."""
     for l in psd.descendants():
         if l.kind == "type":
             ss = l.engine_dict["StyleRun"]["RunArray"][0]["StyleSheet"]["StyleSheetData"]
@@ -166,15 +166,14 @@ def get_font_info(psd, font_path=None):
             color_vals = ss.get("FillColor", {}).get("Values", [1.0, 1.0, 1.0, 1.0])
             rgba = tuple(int(v * 255) for v in color_vals)
 
-            if font_path and l.width > 0 and len(l.text) >= 2:
+            if font_path and l.height > 0:
                 try:
-                    test_font = ImageFont.truetype(font_path, int(raw_size))
-                    bbox = test_font.getbbox(l.text)
-                    pillow_w = bbox[2] - bbox[0]
-                    if pillow_w > 0:
-                        scale = l.width / pillow_w
-                        calibrated = int(raw_size * scale)
-                        return calibrated, rgba
+                    for test_size in range(int(raw_size), int(raw_size) + 20):
+                        test_font = ImageFont.truetype(font_path, test_size)
+                        bb = test_font.getbbox(l.text[0])
+                        h = bb[3] - bb[1]
+                        if h >= l.height:
+                            return test_size, rgba
                 except Exception:
                     pass
 
@@ -183,32 +182,47 @@ def get_font_info(psd, font_path=None):
 
 
 def get_text_layer_positions(psd):
-    """Return {layer_name: (center_x, center_y)} using the layer's vertical center."""
+    """Return {layer_name: (center_x, center_y, layer_width)} for each text layer."""
     positions = {}
     for l in psd.descendants():
         if l.kind == "type":
             cx = (l.left + l.right) // 2
             cy = (l.top + l.bottom) // 2
-            positions[l.name] = (cx, cy)
+            positions[l.name] = (cx, cy, l.width)
     return positions
 
 
-def draw_centered_text(draw, font, text, center_y, img_width, color):
-    """Draw text horizontally centered and vertically centered at center_y."""
-    bbox = font.getbbox(text)
-    text_w = bbox[2] - bbox[0]
-    x = (img_width - text_w) // 2
-    y = center_y - (bbox[1] + bbox[3]) // 2
-    draw.text((x, y), text, font=font, fill=color)
+def draw_centered_text(draw, font, text, center_y, img_width, color, ref_width=None):
+    """Draw text centered. If ref_width given, adjust char spacing to match PSD width."""
+    chars = list(text)
+    char_bboxes = [font.getbbox(c) for c in chars]
+    char_widths = [bb[2] - bb[0] for bb in char_bboxes]
+    sum_w = sum(char_widths)
+
+    spacing = 0.0
+    if ref_width and len(chars) > 1 and ref_width > 0:
+        n_chars = len(chars)
+        ref_scaled = ref_width * len(text) / len(text)
+        spacing = (ref_width - sum_w) / (n_chars - 1)
+    total_w = sum_w + spacing * max(0, len(chars) - 1)
+
+    start_x = (img_width - total_w) / 2
+    bb0 = font.getbbox(text[0])
+    y = center_y - (bb0[1] + bb0[3]) // 2
+
+    cur_x = start_x
+    for i, c in enumerate(chars):
+        draw.text((int(cur_x), y), c, font=font, fill=color)
+        cur_x += char_widths[i] + spacing
 
 
 def generate_one(background, font, text_items, img_width, color):
-    """text_items: list of (text_str, y_pos) to draw, skips None/empty."""
+    """text_items: list of (text_str, center_y, ref_width_or_None)."""
     img = background.copy()
     draw = ImageDraw.Draw(img)
-    for text, y in text_items:
+    for text, cy, ref_w in text_items:
         if text:
-            draw_centered_text(draw, font, text, y, img_width, color)
+            draw_centered_text(draw, font, text, cy, img_width, color, ref_width=ref_w)
     return img
 
 
@@ -216,18 +230,24 @@ def check_image_quality(img, font, text_items, img_width, qr_box):
     """Run quality checks on a generated image, return list of (level, message)."""
     issues = []
 
-    for text, center_y in text_items:
+    for text, center_y, ref_w in text_items:
         if not text:
             continue
-        bbox = font.getbbox(text)
-        text_w = bbox[2] - bbox[0]
-        text_h = bbox[3] - bbox[1]
-        x = (img_width - text_w) // 2
-        draw_y = center_y - (bbox[1] + bbox[3]) // 2
+        chars = list(text)
+        char_widths = [font.getbbox(c)[2] - font.getbbox(c)[0] for c in chars]
+        sum_w = sum(char_widths)
+        if ref_w and len(chars) > 1:
+            total_w = ref_w
+        else:
+            total_w = sum_w
+        x = (img_width - total_w) / 2
+        bb0 = font.getbbox(text[0])
+        text_h = bb0[3] - bb0[1]
+        draw_y = center_y - (bb0[1] + bb0[3]) // 2
         if x < 0:
             issues.append(("error", "\u6587\u5b57\u8d85\u51fa\u56fe\u7247\u5bbd\u5ea6, \u5efa\u8bae\u7f29\u5c0f\u5b57\u53f7"))
         elif x < 20:
-            issues.append(("warning", f"\u6587\u5b57\u8ddd\u8fb9\u7f18\u592a\u8fd1 ({x}px)"))
+            issues.append(("warning", f"\u6587\u5b57\u8ddd\u8fb9\u7f18\u592a\u8fd1 ({int(x)}px)"))
         if draw_y < 0 or draw_y + text_h > img.size[1]:
             issues.append(("error", "\u6587\u5b57\u5782\u76f4\u4f4d\u7f6e\u8d85\u51fa\u56fe\u7247\u8303\u56f4"))
 
@@ -388,8 +408,10 @@ if template_file and list_file:
 
     company_field = None
     company_y = 0
+    company_ref_w = None
     name_field = None
     name_y = 0
+    name_ref_w = None
 
     if enable_company:
         mcol1, mcol2 = st.columns(2) if enable_name else [st.container(), None]
@@ -401,6 +423,7 @@ if template_file and list_file:
                 cl_idx = psd_company_layer_idx if psd_company_layer_idx is not None else max(0, len(layer_names) - 1)
                 company_layer = st.selectbox("\u516c\u53f8\u540d\u5bf9\u5e94 PSD \u56fe\u5c42", layer_names, index=cl_idx)
                 company_y = positions[company_layer][1]
+                company_ref_w = positions[company_layer][2]
             else:
                 company_y = st.number_input("\u516c\u53f8\u540d Y \u5750\u6807", 0, img_height, int(img_height * 0.45))
 
@@ -414,6 +437,7 @@ if template_file and list_file:
                 nl_idx = psd_name_layer_idx if psd_name_layer_idx is not None else 0
                 name_layer = st.selectbox("\u4eba\u540d\u5bf9\u5e94 PSD \u56fe\u5c42", layer_names, index=nl_idx)
                 name_y = positions[name_layer][1]
+                name_ref_w = positions[name_layer][2]
             else:
                 name_y = st.number_input("\u4eba\u540d Y \u5750\u6807", 0, img_height, int(img_height * 0.48))
 
@@ -480,9 +504,9 @@ if template_file and list_file:
     def build_text_items(row):
         items = []
         if enable_company and company_field:
-            items.append((row[company_field], company_y))
+            items.append((row[company_field], company_y, company_ref_w))
         if enable_name and name_field:
-            items.append((row[name_field], name_y))
+            items.append((row[name_field], name_y, name_ref_w))
         return items
 
     def build_filename(row):

@@ -235,7 +235,7 @@ with col2:
         help="支持 CSV / Excel (.xlsx) / 旧版 Excel (.xls)",
     )
 
-qr_file = st.file_uploader("3. 上传替换二维码（可选）", type=["png", "jpg", "jpeg", "webp"])
+qr_file = st.file_uploader("3. 上传替换二维码 (可选)", type=["png", "jpg", "jpeg", "webp"])
 
 if template_file and list_file:
     suffix = file_suffix(template_file)
@@ -298,7 +298,7 @@ if template_file and list_file:
         company_y = positions[company_layer][1]
         name_y = positions[name_layer][1]
     else:
-        st.markdown("**文字位置设置**（图片模板需手动指定 Y 坐标）")
+        st.markdown("**文字位置设置** (图片模板需手动指定 Y 坐标)")
         pcol1, pcol2 = st.columns(2)
         default_company_y = int(img_height * 0.45)
         default_name_y = int(img_height * 0.48)
@@ -311,7 +311,7 @@ if template_file and list_file:
     st.markdown("### 字体选择")
 
     custom_font_file = st.file_uploader(
-        "上传自定义字体（可选，支持 .ttf / .otf）",
+        "上传自定义字体 (可选, 支持 .ttf / .otf)",
         type=["ttf", "otf"],
         help="不上传则使用默认字体 OPPO Sans 4.0",
     )

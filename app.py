@@ -224,18 +224,21 @@ st.markdown("---")
 col1, col2 = st.columns(2)
 with col1:
     template_file = st.file_uploader(
-        "1. 上传模板文件",
+        "Step 1: Upload Template / \u4e0a\u4f20\u6a21\u677f",
         type=ALL_TEMPLATE_TYPES,
-        help="支持 PSD / PSB / PNG / JPG / TIFF / BMP / WebP / PDF / EPS / AI",
+        help="PSD / PSB / PNG / JPG / TIFF / BMP / WebP / PDF / EPS / AI",
     )
 with col2:
     list_file = st.file_uploader(
-        "2. 上传名单",
+        "Step 2: Upload List / \u4e0a\u4f20\u540d\u5355",
         type=LIST_EXTENSIONS,
-        help="支持 CSV / Excel (.xlsx) / 旧版 Excel (.xls)",
+        help="CSV / Excel (.xlsx) / Excel (.xls)",
     )
 
-qr_file = st.file_uploader("3. 上传替换二维码 (可选)", type=["png", "jpg", "jpeg", "webp"])
+qr_file = st.file_uploader(
+    "Step 3: Upload QR Code / \u4e0a\u4f20\u65b0QR\u7801 (Optional)",
+    type=["png", "jpg", "jpeg", "webp"],
+)
 
 if template_file and list_file:
     suffix = file_suffix(template_file)
@@ -433,4 +436,4 @@ if template_file and list_file:
             use_container_width=True,
         )
 else:
-    st.info("请先上传模板文件和名单文件")
+    st.info("Please upload template and list files first / \u8bf7\u5148\u4e0a\u4f20\u6a21\u677f\u548c\u540d\u5355\u6587\u4ef6")

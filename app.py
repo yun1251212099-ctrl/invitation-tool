@@ -146,13 +146,14 @@ def rounded_corner_mask(size, radius):
     return mask
 
 
-def replace_qr(background, qr_image, qr_box, corner_radius=5):
+def replace_qr(background, qr_image, qr_box, corner_radius=3):
     tw = qr_box[2] - qr_box[0]
     th = qr_box[3] - qr_box[1]
-    qr_resized = qr_image.resize((tw, th), Image.LANCZOS)
+    qr_resized = qr_image.convert("RGBA").resize((tw, th), Image.LANCZOS)
     mask = rounded_corner_mask((tw, th), corner_radius)
-    qr_resized.putalpha(mask)
-    background.paste(qr_resized, (qr_box[0], qr_box[1]), qr_resized)
+    bg_region = background.crop(qr_box).convert("RGBA")
+    composite = Image.composite(qr_resized, bg_region, mask)
+    background.paste(composite, (qr_box[0], qr_box[1]))
     return background
 
 
@@ -207,7 +208,7 @@ def generate_one(background, font, text_items, img_width, color):
     return img
 
 
-def check_image_quality(img, font, text_items, img_width, has_qr_box):
+def check_image_quality(img, font, text_items, img_width, qr_box):
     """Run quality checks on a generated image, return list of (level, message)."""
     issues = []
 
@@ -219,24 +220,32 @@ def check_image_quality(img, font, text_items, img_width, has_qr_box):
         text_h = bbox[3] - bbox[1]
         x = (img_width - text_w) // 2
         if x < 0:
-            issues.append(("error", f"\u6587\u5b57\u300c{text}\u300d\u8d85\u51fa\u56fe\u7247\u5bbd\u5ea6, \u5efa\u8bae\u7f29\u5c0f\u5b57\u53f7"))
+            issues.append(("error", "\u6587\u5b57\u8d85\u51fa\u56fe\u7247\u5bbd\u5ea6, \u5efa\u8bae\u7f29\u5c0f\u5b57\u53f7"))
         elif x < 20:
-            issues.append(("warning", f"\u6587\u5b57\u300c{text}\u300d\u8ddd\u8fb9\u7f18\u592a\u8fd1 ({x}px), \u53ef\u80fd\u663e\u793a\u4e0d\u5b8c\u6574"))
+            issues.append(("warning", f"\u6587\u5b57\u8ddd\u8fb9\u7f18\u592a\u8fd1 ({x}px)"))
         if y < 0 or y + text_h > img.size[1]:
-            issues.append(("error", f"\u6587\u5b57\u300c{text}\u300d\u5782\u76f4\u4f4d\u7f6e\u8d85\u51fa\u56fe\u7247\u8303\u56f4 (y={y})"))
+            issues.append(("error", f"\u6587\u5b57\u5782\u76f4\u4f4d\u7f6e\u8d85\u51fa\u56fe\u7247\u8303\u56f4 (y={y})"))
+        center_x = x + text_w // 2
+        offset = abs(center_x - img_width // 2)
+        if offset > 3:
+            issues.append(("warning", f"\u6587\u5b57\u672a\u5c45\u4e2d, \u504f\u79fb{offset}px"))
 
-    if has_qr_box:
+    if qr_box:
         try:
-            arr = np.array(img.convert("RGB"))
+            pad = 10
+            crop_box = (max(0, qr_box[0] - pad), max(0, qr_box[1] - pad),
+                        min(img.width, qr_box[2] + pad), min(img.height, qr_box[3] + pad))
+            qr_crop = img.crop(crop_box).convert("RGB")
+            qr_crop = qr_crop.resize((qr_crop.width * 2, qr_crop.height * 2), Image.LANCZOS)
+            arr = np.array(qr_crop)
             detector = cv2.QRCodeDetector()
-            data, bbox, _ = detector.detectAndDecode(arr)
-            if not data:
-                issues.append(("warning", "\u4e8c\u7ef4\u7801\u65e0\u6cd5\u8bc6\u522b, \u8bf7\u68c0\u67e5\u56fe\u7247\u6e05\u6670\u5ea6"))
+            data, det_bbox, _ = detector.detectAndDecode(arr)
+            if data:
+                issues.append(("success", "\u4e8c\u7ef4\u7801\u53ef\u6b63\u5e38\u8bc6\u522b"))
+            else:
+                issues.append(("warning", "\u4e8c\u7ef4\u7801\u53ef\u80fd\u65e0\u6cd5\u8bc6\u522b, \u5efa\u8bae\u7528\u624b\u673a\u626b\u7801\u786e\u8ba4"))
         except Exception:
-            issues.append(("info", "\u4e8c\u7ef4\u7801\u68c0\u6d4b\u8df3\u8fc7"))
-
-    if not issues:
-        issues.append(("success", "\u68c0\u67e5\u901a\u8fc7, \u672a\u53d1\u73b0\u95ee\u9898"))
+            pass
 
     return issues
 
@@ -515,7 +524,7 @@ if template_file and list_file:
             text_items = build_text_items(row)
             img = generate_one(bg, font, text_items, img_width, font_color)
             fname = build_filename(row)
-            issues = check_image_quality(img, font, text_items, img_width, qr_box is not None)
+            issues = check_image_quality(img, font, text_items, img_width, qr_box)
             preview_imgs.append((img.copy(), fname))
             all_issues.append((fname, issues))
             progress.progress((i + 1) / preview_count,
@@ -533,39 +542,21 @@ if template_file and list_file:
                 with col:
                     st.image(img, caption=caption, use_container_width=True)
 
-        # ── quality check report ──
-        if "preview_issues" in st.session_state:
-            st.markdown("---")
-            st.markdown("#### \u8d28\u91cf\u7b5b\u67e5\u62a5\u544a")
-            has_problems = False
-            for fname, issues in st.session_state["preview_issues"]:
-                for level, msg in issues:
-                    if level == "error":
-                        st.error(f"**{fname}**: {msg}")
-                        has_problems = True
-                    elif level == "warning":
-                        st.warning(f"**{fname}**: {msg}")
-                        has_problems = True
-                    elif level == "success":
-                        pass
-            if not has_problems:
-                st.success("\u5168\u90e8\u68c0\u67e5\u901a\u8fc7! \u6587\u5b57\u5bf9\u9f50\u6b63\u5e38, \u4e8c\u7ef4\u7801\u53ef\u8bc6\u522b")
-
         st.markdown("---")
-        st.markdown("**\u67e5\u770b\u539f\u56fe\u6bd4\u4f8b\u5927\u56fe:**")
-        selected_preview = st.selectbox(
-            "\u9009\u62e9\u67e5\u770b\u5927\u56fe",
-            range(len(preview_imgs)),
-            format_func=lambda i: preview_imgs[i][1],
-        )
-        st.image(preview_imgs[selected_preview][0],
-                 caption=f"\u539f\u56fe\u6bd4\u4f8b: {preview_imgs[selected_preview][1]}",
-                 use_container_width=False)
+        with st.expander("\U0001f50d \u70b9\u51fb\u653e\u5927\u67e5\u770b\u7ec6\u8282", expanded=False):
+            selected_preview = st.selectbox(
+                "\u9009\u62e9\u56fe\u7247",
+                range(len(preview_imgs)),
+                format_func=lambda i: preview_imgs[i][1],
+            )
+            st.image(preview_imgs[selected_preview][0],
+                     caption=preview_imgs[selected_preview][1],
+                     use_container_width=False)
 
-        # ── step 2: confirm and generate all ──
+        # ── generate all ──
         st.markdown("---")
-        st.markdown("### \u786e\u8ba4\u5e76\u6253\u5305")
-        if st.button(f"\u786e\u8ba4\u65e0\u8bef, \u751f\u6210\u5168\u90e8 {total} \u5f20\u5e76\u6253\u5305",
+        st.markdown("### \u751f\u6210\u5168\u90e8")
+        if st.button(f"\u751f\u6210\u5168\u90e8 {total} \u5f20",
                      type="primary", use_container_width=True):
             progress2 = st.progress(0, text="\u6b63\u5728\u751f\u6210...")
             all_img_data = []
@@ -578,16 +569,60 @@ if template_file and list_file:
                 progress2.progress((i + 1) / total,
                                    text=f"\u6b63\u5728\u751f\u6210 [{i+1}/{total}] {fname}")
 
-            progress2.progress(1.0, text=f"\u5168\u90e8\u5b8c\u6210! \u5171 {total} \u5f20")
-            st.balloons()
+            progress2.progress(1.0, text=f"\u5168\u90e8\u751f\u6210\u5b8c\u6210! \u5171 {total} \u5f20")
+            st.session_state["all_img_data"] = all_img_data
+            st.session_state["check_done"] = False
 
+    # ── quality check after generation ──
+    if "all_img_data" in st.session_state and st.session_state["all_img_data"]:
+        all_img_data = st.session_state["all_img_data"]
+
+        if not st.session_state.get("check_done", False):
+            st.markdown("---")
+            st.markdown("### \u8d28\u91cf\u68c0\u67e5")
+            if st.button("\U0001f50d \u4e00\u952e\u68c0\u67e5\u6240\u6709\u56fe\u7247", use_container_width=True):
+                check_count = min(10, len(all_img_data))
+                all_check_issues = []
+                check_progress = st.progress(0, text="\u6b63\u5728\u68c0\u67e5...")
+                for i in range(check_count):
+                    fname = all_img_data[i][0]
+                    img = Image.open(io.BytesIO(all_img_data[i][1])).convert("RGBA")
+                    row = rows[i]
+                    text_items = build_text_items(row)
+                    issues = check_image_quality(img, font, text_items, img_width, qr_box)
+                    all_check_issues.append((fname, issues))
+                    check_progress.progress((i + 1) / check_count,
+                                            text=f"\u68c0\u67e5 [{i+1}/{check_count}]")
+                check_progress.progress(1.0, text="\u68c0\u67e5\u5b8c\u6210!")
+
+                has_errors = False
+                has_warnings = False
+                for fname, issues in all_check_issues:
+                    for level, msg in issues:
+                        if level == "error":
+                            st.error(f"**{fname}**: {msg}")
+                            has_errors = True
+                        elif level == "warning":
+                            st.warning(f"**{fname}**: {msg}")
+                            has_warnings = True
+
+                if not has_errors and not has_warnings:
+                    st.success("\u2705 \u5168\u90e8\u68c0\u67e5\u901a\u8fc7! \u5b57\u4f53\u5c45\u4e2d\u6b63\u5e38 / \u5b57\u53f7\u4e00\u81f4 / \u4e8c\u7ef4\u7801\u53ef\u8bc6\u522b")
+                elif not has_errors:
+                    st.info("\u68c0\u67e5\u5b8c\u6210, \u6709\u8f7b\u5fae\u8b66\u544a\u4f46\u4e0d\u5f71\u54cd\u4f7f\u7528")
+
+                st.session_state["check_done"] = True
+
+        if st.session_state.get("check_done", False):
+            st.markdown("---")
+            total_gen = len(all_img_data)
             zip_buf = io.BytesIO()
             with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
                 for filename, data in all_img_data:
                     zf.writestr(filename, data)
 
             st.download_button(
-                label=f"\u4e0b\u8f7d\u5168\u90e8 ({total} \u5f20 ZIP)",
+                label=f"\u2705 \u68c0\u67e5\u901a\u8fc7, \u4e0b\u8f7d\u5168\u90e8 ({total_gen} \u5f20 ZIP)",
                 data=zip_buf.getvalue(),
                 file_name="\u9080\u8bf7\u51fd\u6279\u91cf\u751f\u6210.zip",
                 mime="application/zip",

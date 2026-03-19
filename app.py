@@ -407,8 +407,11 @@ if template_file and list_file:
     elif has_company_field and not has_name_field:
         st.info(f"\u5df2\u81ea\u52a8\u8bc6\u522b: \u516c\u53f8\u540d=\u300c{fields[company_idx]}\u300d (\u672a\u68c0\u6d4b\u5230\u4eba\u540d\u5b57\u6bb5)")
 
-    enable_company = st.checkbox("\u542f\u7528\u516c\u53f8\u540d", value=has_company_field)
-    enable_name = st.checkbox("\u542f\u7528\u4eba\u540d", value=has_name_field)
+    st.caption("\u6839\u636e\u4f60\u7684\u540d\u5355\u5185\u5bb9\u52fe\u9009\u9700\u8981\u66ff\u6362\u7684\u5b57\u6bb5\u3002\u672a\u52fe\u9009\u7684\u5b57\u6bb5\u4e0d\u4f1a\u66ff\u6362\uff0c\u4fdd\u6301\u539f\u6a21\u677f\u5185\u5bb9\u3002")
+    enable_company = st.checkbox("\u542f\u7528\u516c\u53f8\u540d", value=has_company_field,
+                                 help="\u52fe\u9009\u540e\u4f1a\u7528\u540d\u5355\u4e2d\u7684\u516c\u53f8\u540d\u66ff\u6362\u6a21\u677f\u4e2d\u7684\u516c\u53f8\u540d\u4f4d\u7f6e")
+    enable_name = st.checkbox("\u542f\u7528\u4eba\u540d", value=has_name_field,
+                              help="\u52fe\u9009\u540e\u4f1a\u7528\u540d\u5355\u4e2d\u7684\u4eba\u540d\u66ff\u6362\u6a21\u677f\u4e2d\u7684\u4eba\u540d\u4f4d\u7f6e")
 
     if not enable_company and not enable_name:
         st.warning("\u81f3\u5c11\u9700\u8981\u542f\u7528\u4e00\u4e2a\u5b57\u6bb5")
@@ -420,6 +423,8 @@ if template_file and list_file:
     name_field = None
     name_y = 0
     name_ref_w = None
+    company_layer = None
+    name_layer = None
 
     if enable_company:
         mcol1, mcol2 = st.columns(2) if enable_name else [st.container(), None]
@@ -448,6 +453,39 @@ if template_file and list_file:
                 name_ref_w = positions[name_layer][2]
             else:
                 name_y = st.number_input("\u4eba\u540d Y \u5750\u6807", 0, img_height, int(img_height * 0.48))
+
+    # ── error detection ──
+    mapping_ok = True
+    if enable_company and enable_name:
+        if company_field == name_field:
+            st.error("\u516c\u53f8\u540d\u548c\u4eba\u540d\u9009\u4e86\u540c\u4e00\u4e2a\u5b57\u6bb5\uff0c\u8bf7\u4fee\u6539!")
+            mapping_ok = False
+        if is_psd and company_layer and name_layer and company_layer == name_layer:
+            st.error("\u516c\u53f8\u540d\u548c\u4eba\u540d\u9009\u4e86\u540c\u4e00\u4e2a PSD \u56fe\u5c42\uff0c\u8bf7\u4fee\u6539!")
+            mapping_ok = False
+
+    if mapping_ok and enable_name and name_field:
+        sample_names = [rows[i][name_field] for i in range(min(3, len(rows)))]
+        long_names = [n for n in sample_names if len(n) > 4]
+        if long_names:
+            st.warning(f"\u4eba\u540d\u5b57\u6bb5\u4e2d\u53d1\u73b0\u8f83\u957f\u7684\u503c: \u300c{'、'.join(long_names)}\u300d\uff0c\u8bf7\u786e\u8ba4\u662f\u5426\u9009\u5bf9\u4e86\u5b57\u6bb5")
+
+    # ── mapping preview table ──
+    if mapping_ok:
+        st.markdown("**\u6620\u5c04\u9884\u89c8 (\u524d3\u884c):**")
+        preview_data = []
+        for i in range(min(3, len(rows))):
+            row_preview = {}
+            if enable_company and company_field:
+                row_preview["\u516c\u53f8\u540d"] = rows[i][company_field]
+            if enable_name and name_field:
+                row_preview["\u4eba\u540d"] = rows[i][name_field]
+            preview_data.append(row_preview)
+        if preview_data:
+            st.table(preview_data)
+
+    if not mapping_ok:
+        st.stop()
 
     # ── font selection ──
     st.markdown("### 字体选择")

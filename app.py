@@ -165,17 +165,21 @@ def replace_qr(background, qr_image, qr_box, corner_radius=3):
     return background
 
 
-def calibrate_font_size(font_path, text, target_width, raw_size):
-    """Find the Pillow font size where draw.text width matches target_width."""
+def calibrate_font_size(font_path, text, target_height, raw_size):
+    """Find Pillow font size where text height matches PSD layer height."""
+    best_size = int(raw_size)
+    best_diff = 999
     for s in range(int(raw_size), int(raw_size) + 20):
         f = ImageFont.truetype(font_path, s)
         bb = f.getbbox(text)
-        w = bb[2] - bb[0]
-        if w >= target_width:
-            if abs(w - target_width) <= abs((w - (bb[2] - bb[0])) - target_width):
-                return s
-            return max(s - 1, int(raw_size))
-    return int(raw_size)
+        h = bb[3] - bb[1]
+        diff = abs(h - target_height)
+        if diff < best_diff:
+            best_diff = diff
+            best_size = s
+        if h >= target_height:
+            return s
+    return best_size
 
 
 def get_font_color(psd):
@@ -197,8 +201,8 @@ def get_text_layer_positions(psd, font_path=None):
             ss = l.engine_dict["StyleRun"]["RunArray"][0]["StyleSheet"]["StyleSheetData"]
             raw_size = ss.get("FontSize", 51)
             cal_size = int(raw_size)
-            if font_path and l.width > 0 and len(l.text) >= 2:
-                cal_size = calibrate_font_size(font_path, l.text, l.width, raw_size)
+            if font_path and l.height > 0 and len(l.text) >= 1:
+                cal_size = calibrate_font_size(font_path, l.text, l.height, raw_size)
             positions[l.name] = (cy, cal_size, l.width)
     return positions
 

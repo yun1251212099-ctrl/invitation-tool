@@ -559,6 +559,29 @@ if template_file and list_file:
         st.image(preview, caption=f"\u66ff\u6362\u6548\u679c: {build_filename(first)}",
                  use_container_width=True)
 
+    st.markdown("---")
+    st.caption("\u8bf7\u4ed4\u7ec6\u5bf9\u6bd4\u4e0a\u65b9\u4e24\u5f20\u56fe\uff0c\u786e\u8ba4\u5b57\u4f53\u5927\u5c0f\u3001\u4f4d\u7f6e\u3001\u95f4\u8ddd\u3001\u4e8c\u7ef4\u7801\u662f\u5426\u4e0e\u539f\u56fe\u4e00\u81f4\u3002")
+
+    if "preview_confirmed" not in st.session_state:
+        st.session_state.preview_confirmed = False
+
+    confirm_col1, confirm_col2 = st.columns(2)
+    with confirm_col1:
+        if st.button("\u2705 \u6548\u679c\u6b63\u786e\uff0c\u7ee7\u7eed\u4e0b\u4e00\u6b65", type="primary", use_container_width=True):
+            st.session_state.preview_confirmed = True
+            st.rerun()
+    with confirm_col2:
+        report = st.text_input("\u274c \u53d1\u73b0\u9519\u8bef\uff1f\u8bf7\u63cf\u8ff0\u95ee\u9898", placeholder="\u4f8b\u5982: \u5b57\u4f53\u504f\u5c0f / \u4f4d\u7f6e\u504f\u79fb / \u95f4\u8ddd\u4e0d\u5bf9...")
+        if report:
+            st.warning(f"\u4f60\u53cd\u9988\u7684\u95ee\u9898: \u300c{report}\u300d")
+            st.info("\u8bf7\u8c03\u6574\u4e0a\u65b9\u7684\u5b57\u6bb5\u6620\u5c04\u6216\u5b57\u4f53\u8bbe\u7f6e\u540e\uff0c\u9875\u9762\u4f1a\u81ea\u52a8\u66f4\u65b0\u9884\u89c8\u3002\u786e\u8ba4\u65e0\u8bef\u540e\u518d\u70b9\u201c\u6548\u679c\u6b63\u786e\u201d\u3002")
+            st.session_state.preview_confirmed = False
+            st.stop()
+
+    if not st.session_state.preview_confirmed:
+        st.info("\u8bf7\u5148\u786e\u8ba4\u4e0a\u65b9\u9884\u89c8\u6548\u679c\u65e0\u8bef\uff0c\u624d\u80fd\u7ee7\u7eed\u4e0b\u4e00\u6b65")
+        st.stop()
+
     # ── step 1: preview samples ──
     st.markdown("### \u751f\u6210\u9884\u89c8")
     total = len(rows)

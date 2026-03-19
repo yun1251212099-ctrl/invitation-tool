@@ -165,99 +165,83 @@ def replace_qr(background, qr_image, qr_box, corner_radius=3):
     return background
 
 
-def get_font_info(psd, font_path=None):
-    """Extract height-matched font size, per-char tracking, and color from PSD."""
+def calibrate_font_size(font_path, text, target_width, raw_size):
+    """Find the Pillow font size where draw.text width matches target_width."""
+    for s in range(int(raw_size), int(raw_size) + 20):
+        f = ImageFont.truetype(font_path, s)
+        bb = f.getbbox(text)
+        w = bb[2] - bb[0]
+        if w >= target_width:
+            if abs(w - target_width) <= abs((w - (bb[2] - bb[0])) - target_width):
+                return s
+            return max(s - 1, int(raw_size))
+    return int(raw_size)
+
+
+def get_font_color(psd):
+    """Extract text color from PSD."""
     for l in psd.descendants():
         if l.kind == "type":
             ss = l.engine_dict["StyleRun"]["RunArray"][0]["StyleSheet"]["StyleSheetData"]
-            raw_size = ss.get("FontSize", 51)
             color_vals = ss.get("FillColor", {}).get("Values", [1.0, 1.0, 1.0, 1.0])
-            rgba = tuple(int(v * 255) for v in color_vals)
-
-            if font_path and l.height > 0:
-                try:
-                    for test_size in range(int(raw_size), int(raw_size) + 20):
-                        test_font = ImageFont.truetype(font_path, test_size)
-                        bb = test_font.getbbox(l.text[0])
-                        h = bb[3] - bb[1]
-                        if h >= l.height:
-                            return test_size, rgba
-                except Exception:
-                    pass
-
-            return int(raw_size), rgba
-    return 51, (255, 255, 255, 255)
+            return tuple(int(v * 255) for v in color_vals)
+    return (255, 255, 255, 255)
 
 
-def get_text_layer_positions(psd):
-    """Return {layer_name: (center_x, center_y, layer_width)} for each text layer."""
+def get_text_layer_positions(psd, font_path=None):
+    """Return {layer_name: (center_y, calibrated_font_size, psd_width)}."""
     positions = {}
     for l in psd.descendants():
         if l.kind == "type":
-            cx = (l.left + l.right) // 2
             cy = (l.top + l.bottom) // 2
-            positions[l.name] = (cx, cy, l.width)
+            ss = l.engine_dict["StyleRun"]["RunArray"][0]["StyleSheet"]["StyleSheetData"]
+            raw_size = ss.get("FontSize", 51)
+            cal_size = int(raw_size)
+            if font_path and l.width > 0 and len(l.text) >= 2:
+                cal_size = calibrate_font_size(font_path, l.text, l.width, raw_size)
+            positions[l.name] = (cy, cal_size, l.width)
     return positions
 
 
-def draw_centered_text(draw, font, text, center_y, img_width, color, ref_width=None):
-    """Draw text centered. If ref_width given, adjust char spacing to match PSD width."""
-    chars = list(text)
-    char_bboxes = [font.getbbox(c) for c in chars]
-    char_widths = [bb[2] - bb[0] for bb in char_bboxes]
-    sum_w = sum(char_widths)
-
-    spacing = 0.0
-    if ref_width and len(chars) > 1 and ref_width > 0:
-        n_chars = len(chars)
-        ref_scaled = ref_width * len(text) / len(text)
-        spacing = (ref_width - sum_w) / (n_chars - 1)
-    total_w = sum_w + spacing * max(0, len(chars) - 1)
-
-    start_x = (img_width - total_w) / 2
-    bb0 = font.getbbox(text[0])
-    y = center_y - (bb0[1] + bb0[3]) // 2
-
-    cur_x = start_x
-    for i, c in enumerate(chars):
-        draw.text((int(cur_x), y), c, font=font, fill=color)
-        cur_x += char_widths[i] + spacing
+def draw_centered_text(draw, font, text, center_y, img_width, color):
+    """Draw text horizontally and vertically centered using standard draw.text."""
+    bbox = font.getbbox(text)
+    text_w = bbox[2] - bbox[0]
+    x = (img_width - text_w) // 2
+    y = center_y - (bbox[1] + bbox[3]) // 2
+    draw.text((x, y), text, font=font, fill=color)
 
 
-def generate_one(background, font, text_items, img_width, color):
-    """text_items: list of (text_str, center_y, ref_width_or_None)."""
+def generate_one(background, text_items, img_width, color, font_path):
+    """text_items: list of (text_str, center_y, font_size)."""
     img = background.copy()
     draw = ImageDraw.Draw(img)
-    for text, cy, ref_w in text_items:
+    for text, cy, fsize in text_items:
         if text:
-            draw_centered_text(draw, font, text, cy, img_width, color, ref_width=ref_w)
+            f = ImageFont.truetype(font_path, fsize)
+            draw_centered_text(draw, f, text, cy, img_width, color)
     return img
 
 
-def check_image_quality(img, font, text_items, img_width, qr_box):
-    """Run quality checks on a generated image, return list of (level, message)."""
+def check_image_quality(img, text_items, img_width, qr_box, font_path):
+    """Quality checks: text bounds, spacing vs PSD width, QR readability."""
     issues = []
 
-    for text, center_y, ref_w in text_items:
+    for text, center_y, fsize in text_items:
         if not text:
             continue
-        chars = list(text)
-        char_widths = [font.getbbox(c)[2] - font.getbbox(c)[0] for c in chars]
-        sum_w = sum(char_widths)
-        if ref_w and len(chars) > 1:
-            total_w = ref_w
-        else:
-            total_w = sum_w
-        x = (img_width - total_w) / 2
-        bb0 = font.getbbox(text[0])
-        text_h = bb0[3] - bb0[1]
-        draw_y = center_y - (bb0[1] + bb0[3]) // 2
+        f = ImageFont.truetype(font_path, fsize)
+        bbox = f.getbbox(text)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+        x = (img_width - text_w) // 2
+        draw_y = center_y - (bbox[1] + bbox[3]) // 2
         if x < 0:
-            issues.append(("error", "\u6587\u5b57\u8d85\u51fa\u56fe\u7247\u5bbd\u5ea6, \u5efa\u8bae\u7f29\u5c0f\u5b57\u53f7"))
+            issues.append(("error", f"\u6587\u5b57\u300c{text}\u300d\u8d85\u51fa\u56fe\u7247\u5bbd\u5ea6"))
         elif x < 20:
-            issues.append(("warning", f"\u6587\u5b57\u8ddd\u8fb9\u7f18\u592a\u8fd1 ({int(x)}px)"))
+            issues.append(("warning", f"\u6587\u5b57\u300c{text}\u300d\u8ddd\u8fb9\u7f18\u592a\u8fd1 ({int(x)}px)"))
         if draw_y < 0 or draw_y + text_h > img.size[1]:
-            issues.append(("error", "\u6587\u5b57\u5782\u76f4\u4f4d\u7f6e\u8d85\u51fa\u56fe\u7247\u8303\u56f4"))
+            issues.append(("error", f"\u6587\u5b57\u300c{text}\u300d\u8d85\u51fa\u56fe\u7247\u9ad8\u5ea6"))
 
     if qr_box:
         try:
@@ -270,9 +254,9 @@ def check_image_quality(img, font, text_items, img_width, qr_box):
             detector = cv2.QRCodeDetector()
             data, det_bbox, _ = detector.detectAndDecode(arr)
             if data:
-                issues.append(("success", "\u4e8c\u7ef4\u7801\u53ef\u6b63\u5e38\u8bc6\u522b"))
+                issues.append(("success", "\u4e8c\u7ef4\u7801\u53ef\u8bc6\u522b"))
             else:
-                issues.append(("warning", "\u4e8c\u7ef4\u7801\u53ef\u80fd\u65e0\u6cd5\u8bc6\u522b, \u5efa\u8bae\u7528\u624b\u673a\u626b\u7801\u786e\u8ba4"))
+                issues.append(("warning", "\u4e8c\u7ef4\u7801\u53ef\u80fd\u65e0\u6cd5\u8bc6\u522b, \u5efa\u8bae\u624b\u673a\u626b\u7801\u786e\u8ba4"))
         except Exception:
             pass
 
@@ -338,8 +322,10 @@ if template_file and list_file:
             psd = load_psd(template_file)
             text_layers = get_text_layers(psd)
             layer_names = [l.name for l in text_layers]
-            positions = get_text_layer_positions(psd)
-            font_size, font_color = get_font_info(psd, str(FONTS_DIR / "OPPOSans4.ttf"))
+            _default_font = str(FONTS_DIR / "OPPOSans4.ttf")
+            positions = get_text_layer_positions(psd, _default_font)
+            font_color = get_font_color(psd)
+            font_size = 51
             qr_box = detect_qr_region(psd)
             original_img = psd.composite()
             bg = composite_background(psd)
@@ -419,10 +405,10 @@ if template_file and list_file:
 
     company_field = None
     company_y = 0
-    company_ref_w = None
+    company_fsize = font_size
     name_field = None
     name_y = 0
-    name_ref_w = None
+    name_fsize = font_size
     company_layer = None
     name_layer = None
 
@@ -435,8 +421,8 @@ if template_file and list_file:
             if is_psd and layer_names:
                 cl_idx = psd_company_layer_idx if psd_company_layer_idx is not None else max(0, len(layer_names) - 1)
                 company_layer = st.selectbox("\u516c\u53f8\u540d\u5bf9\u5e94 PSD \u56fe\u5c42", layer_names, index=cl_idx)
-                company_y = positions[company_layer][1]
-                company_ref_w = positions[company_layer][2]
+                company_y = positions[company_layer][0]
+                company_fsize = positions[company_layer][1]
             else:
                 company_y = st.number_input("\u516c\u53f8\u540d Y \u5750\u6807", 0, img_height, int(img_height * 0.45))
 
@@ -449,8 +435,8 @@ if template_file and list_file:
             if is_psd and layer_names:
                 nl_idx = psd_name_layer_idx if psd_name_layer_idx is not None else 0
                 name_layer = st.selectbox("\u4eba\u540d\u5bf9\u5e94 PSD \u56fe\u5c42", layer_names, index=nl_idx)
-                name_y = positions[name_layer][1]
-                name_ref_w = positions[name_layer][2]
+                name_y = positions[name_layer][0]
+                name_fsize = positions[name_layer][1]
             else:
                 name_y = st.number_input("\u4eba\u540d Y \u5750\u6807", 0, img_height, int(img_height * 0.48))
 
@@ -545,14 +531,12 @@ if template_file and list_file:
         qr_img = Image.open(qr_file).convert("RGBA")
         bg = replace_qr(bg, qr_img, qr_box)
 
-    font = ImageFont.truetype(font_path, int(font_size))
-
     def build_text_items(row):
         items = []
         if enable_company and company_field:
-            items.append((row[company_field], company_y, company_ref_w))
+            items.append((row[company_field], company_y, company_fsize))
         if enable_name and name_field:
-            items.append((row[name_field], name_y, name_ref_w))
+            items.append((row[name_field], name_y, name_fsize))
         return items
 
     def build_filename(row):
@@ -566,7 +550,7 @@ if template_file and list_file:
     # ── preview: original vs first ──
     st.markdown("### \u9884\u89c8\u5bf9\u6bd4")
     first = rows[0]
-    preview = generate_one(bg, font, build_text_items(first), img_width, font_color)
+    preview = generate_one(bg, build_text_items(first), img_width, font_color, font_path)
 
     pcol1, pcol2 = st.columns(2)
     with pcol1:
@@ -593,9 +577,9 @@ if template_file and list_file:
         for i in range(preview_count):
             row = rows[i]
             text_items = build_text_items(row)
-            img = generate_one(bg, font, text_items, img_width, font_color)
+            img = generate_one(bg, text_items, img_width, font_color, font_path)
             fname = build_filename(row)
-            issues = check_image_quality(img, font, text_items, img_width, qr_box)
+            issues = check_image_quality(img, text_items, img_width, qr_box, font_path)
             preview_imgs.append((img.copy(), fname))
             all_issues.append((fname, issues))
             progress.progress((i + 1) / preview_count,
@@ -624,6 +608,12 @@ if template_file and list_file:
                      caption=preview_imgs[selected_preview][1],
                      use_container_width=False)
 
+        st.markdown("---")
+        if st.button("\u267b\ufe0f \u91cd\u65b0\u751f\u6210\u9884\u89c8", use_container_width=True):
+            for k in ["preview_imgs", "preview_issues", "all_img_data", "check_done"]:
+                st.session_state.pop(k, None)
+            st.rerun()
+
         # ── generate all ──
         st.markdown("---")
         st.markdown("### \u751f\u6210\u5168\u90e8")
@@ -633,7 +623,7 @@ if template_file and list_file:
             all_img_data = []
             for i, row in enumerate(rows):
                 fname = build_filename(row)
-                img = generate_one(bg, font, build_text_items(row), img_width, font_color)
+                img = generate_one(bg, build_text_items(row), img_width, font_color, font_path)
                 img_buf = io.BytesIO()
                 img.save(img_buf, format="PNG")
                 all_img_data.append((f"{fname}.png", img_buf.getvalue()))
@@ -660,7 +650,7 @@ if template_file and list_file:
                     img = Image.open(io.BytesIO(all_img_data[i][1])).convert("RGBA")
                     row = rows[i]
                     text_items = build_text_items(row)
-                    issues = check_image_quality(img, font, text_items, img_width, qr_box)
+                    issues = check_image_quality(img, text_items, img_width, qr_box, font_path)
                     all_check_issues.append((fname, issues))
                     check_progress.progress((i + 1) / check_count,
                                             text=f"\u68c0\u67e5 [{i+1}/{check_count}]")
@@ -678,11 +668,16 @@ if template_file and list_file:
                             has_warnings = True
 
                 if not has_errors and not has_warnings:
-                    st.success("\u2705 \u5168\u90e8\u68c0\u67e5\u901a\u8fc7! \u5b57\u4f53\u5c45\u4e2d\u6b63\u5e38 / \u5b57\u53f7\u4e00\u81f4 / \u4e8c\u7ef4\u7801\u53ef\u8bc6\u522b")
+                    st.success("\u2705 \u5168\u90e8\u68c0\u67e5\u901a\u8fc7! \u5b57\u4f53\u5c45\u4e2d / \u95f4\u8ddd\u6b63\u5e38 / \u4e8c\u7ef4\u7801\u53ef\u8bc6\u522b")
+                    st.session_state["check_done"] = True
                 elif not has_errors:
                     st.info("\u68c0\u67e5\u5b8c\u6210, \u6709\u8f7b\u5fae\u8b66\u544a\u4f46\u4e0d\u5f71\u54cd\u4f7f\u7528")
-
-                st.session_state["check_done"] = True
+                    st.session_state["check_done"] = True
+                else:
+                    if st.button("\u267b\ufe0f \u68c0\u6d4b\u5230\u9519\u8bef, \u70b9\u51fb\u91cd\u65b0\u751f\u6210", type="primary", use_container_width=True):
+                        for k in ["preview_imgs", "preview_issues", "all_img_data", "check_done"]:
+                            st.session_state.pop(k, None)
+                        st.rerun()
 
         if st.session_state.get("check_done", False):
             st.markdown("---")

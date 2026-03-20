@@ -20,6 +20,39 @@ FONTS_DIR = APP_DIR / "fonts"
 
 st.set_page_config(page_title="批量邀请函生成", page_icon="📨", layout="centered")
 st.title("批量邀请函生成工具")
+
+# Streamlit 內建上傳元件預設是英文，這裡用樣式覆蓋成中文提示。
+st.markdown(
+    """
+    <style>
+    [data-testid="stFileUploaderDropzoneInstructions"] > div {
+        display: none;
+    }
+    [data-testid="stFileUploaderDropzoneInstructions"]::before {
+        content: "將檔案拖曳到這裡";
+        display: block;
+        font-size: 1.35rem;
+        font-weight: 600;
+        margin-bottom: 0.25rem;
+    }
+    [data-testid="stFileUploaderDropzoneInstructions"]::after {
+        content: "每個檔案上限 2GB";
+        display: block;
+        font-size: 1rem;
+        color: rgba(250, 250, 250, 0.72);
+    }
+    [data-testid="stFileUploaderDropzone"] button {
+        font-size: 0 !important;
+    }
+    [data-testid="stFileUploaderDropzone"] button::after {
+        content: "選擇檔案";
+        font-size: 1.25rem;
+        font-weight: 600;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 with st.expander("\u540c\u4e8b\u7aef\u7ea2\u6846\u62a5\u9519\u6392\u67e5", expanded=False):
     st.markdown(
         "- `TypeError: Failed to fetch dynamically imported module` \u901a\u5e38\u662f\u6d4f\u89c8\u5668\u7f13\u5b58\u6216\u7f51\u7edc\u963b\u62e6\u5bfc\u81f4\u3002\n"

@@ -77,6 +77,23 @@ st.markdown(
         font-size: 0.92rem;
         color: rgba(128, 128, 132, 0.95);
     }
+    .action-card {
+        border: 1px solid rgba(120, 120, 128, 0.35);
+        border-radius: 12px;
+        padding: 0.65rem 0.8rem;
+        margin-bottom: 0.55rem;
+        background: rgba(120, 120, 128, 0.06);
+    }
+    .action-card strong {
+        display: block;
+        font-size: 0.98rem;
+        margin-bottom: 0.2rem;
+    }
+    .action-card span {
+        display: block;
+        font-size: 0.86rem;
+        color: rgba(128, 128, 132, 0.95);
+    }
     [data-testid="stFileUploaderDropzone"] {
         border-radius: 14px;
         border: 1px solid rgba(120, 120, 128, 0.35);
@@ -348,6 +365,122 @@ def check_image_quality(img, text_items, img_width, qr_box, font_path):
                 issues.append(("warning", "\u4e8c\u7ef4\u7801\u53ef\u80fd\u65e0\u6cd5\u8bc6\u522b, \u5efa\u8bae\u624b\u673a\u626b\u7801\u786e\u8ba4"))
         except Exception:
             pass
+
+    return issues
+
+
+def compare_preview_quality(original_img, preview_img, text_items, img_width, qr_box, font_path, use_custom_font=False):
+    """Compare original vs preview for diff-based quality checks."""
+    issues = []
+
+    # 2) 字体应用是否符合指定字体策略
+    font_name = Path(font_path).name.lower() if font_path else ""
+    if use_custom_font:
+        issues.append(("success", f"已应用自定义字体: {Path(font_path).name}"))
+    else:
+        if "oppo" in font_name:
+            issues.append(("success", "字体检查通过：已使用 OPPO 字体"))
+        else:
+            issues.append(("warning", f"字体可能不是指定 OPPO 字体（当前: {Path(font_path).name}）"))
+
+    # 1) 字体大小、字距、边距、居中、对齐 + 5) 空格
+    for text, center_y, fsize in text_items:
+        if not text:
+            issues.append(("warning", "检测到空文本，可能导致内容缺失"))
+            continue
+
+        if text != text.strip():
+            issues.append(("warning", f"文本「{text}」存在首尾空格"))
+        if "  " in text:
+            issues.append(("warning", f"文本「{text}」存在连续空格"))
+
+        f = ImageFont.truetype(font_path, fsize)
+        bbox = f.getbbox(text)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+        x = (img_width - text_w) // 2
+        y = center_y - (bbox[1] + bbox[3]) // 2
+        left_gap = x
+        right_gap = img_width - (x + text_w)
+        if abs(left_gap - right_gap) > 6:
+            issues.append(("warning", f"文本「{text}」左右边距不平衡（差值 {abs(left_gap-right_gap)}px）"))
+        draw_center = y + text_h / 2
+        if abs(draw_center - center_y) > 3:
+            issues.append(("warning", f"文本「{text}」垂直对齐偏差 {abs(draw_center-center_y):.1f}px"))
+
+    # 3) 背景清晰和细节是否变化
+    try:
+        ori_rgb = np.array(original_img.convert("RGB"), dtype=np.int16)
+        pre_rgb = np.array(preview_img.convert("RGB"), dtype=np.int16)
+        if ori_rgb.shape == pre_rgb.shape:
+            h, w, _ = ori_rgb.shape
+            mask = np.ones((h, w), dtype=np.uint8)
+
+            for text, center_y, fsize in text_items:
+                if not text:
+                    continue
+                f = ImageFont.truetype(font_path, fsize)
+                bbox = f.getbbox(text)
+                text_w = bbox[2] - bbox[0]
+                text_h = bbox[3] - bbox[1]
+                x = max(0, (img_width - text_w) // 2 - 18)
+                y = max(0, int(center_y - (bbox[1] + bbox[3]) // 2) - 18)
+                x2 = min(w, x + text_w + 36)
+                y2 = min(h, y + text_h + 36)
+                mask[y:y2, x:x2] = 0
+
+            if qr_box:
+                x1, y1, x2, y2 = qr_box
+                x1 = max(0, x1 - 16)
+                y1 = max(0, y1 - 16)
+                x2 = min(w, x2 + 16)
+                y2 = min(h, y2 + 16)
+                mask[y1:y2, x1:x2] = 0
+
+            diff = np.abs(pre_rgb - ori_rgb).mean(axis=2)
+            bg_diff = float(diff[mask == 1].mean()) if np.any(mask == 1) else 0.0
+            if bg_diff > 7.5:
+                issues.append(("warning", f"背景差异偏大（均值 {bg_diff:.2f}），可能影响清晰度或细节"))
+            else:
+                issues.append(("success", "背景差异检查通过"))
+
+            ori_gray = cv2.cvtColor(ori_rgb.astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            pre_gray = cv2.cvtColor(pre_rgb.astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            ori_sharp = cv2.Laplacian(ori_gray, cv2.CV_64F).var()
+            pre_sharp = cv2.Laplacian(pre_gray, cv2.CV_64F).var()
+            if ori_sharp > 0 and pre_sharp / ori_sharp < 0.82:
+                issues.append(("warning", f"替换图清晰度下降（{pre_sharp/ori_sharp:.2f}x）"))
+    except Exception:
+        issues.append(("warning", "背景清晰度检查失败，请人工放大复核细节"))
+
+    # 4) 二维码清晰度与乱码
+    if qr_box:
+        try:
+            qx1, qy1, qx2, qy2 = qr_box
+            qr_crop = preview_img.crop((qx1, qy1, qx2, qy2)).convert("RGB")
+            qr_arr = np.array(qr_crop)
+            qr_gray = cv2.cvtColor(qr_arr, cv2.COLOR_RGB2GRAY)
+            qr_sharp = cv2.Laplacian(qr_gray, cv2.CV_64F).var()
+            if qr_sharp < 45:
+                issues.append(("warning", "二维码清晰度偏低，可能影响扫码"))
+
+            detector = cv2.QRCodeDetector()
+            data, _, _ = detector.detectAndDecode(qr_arr)
+            if not data:
+                issues.append(("error", "二维码可能存在乱码或不可识别"))
+        except Exception:
+            issues.append(("warning", "二维码细节检查失败，请人工扫码复核"))
+
+    # 6) 图片是否乱码（全图异常波动）
+    try:
+        ori = np.array(original_img.convert("RGB"), dtype=np.int16)
+        pre = np.array(preview_img.convert("RGB"), dtype=np.int16)
+        if ori.shape == pre.shape:
+            global_diff = float(np.abs(pre - ori).mean())
+            if global_diff > 20:
+                issues.append(("warning", f"全图差异偏大（{global_diff:.2f}），可能存在异常渲染或乱码"))
+    except Exception:
+        pass
 
     return issues
 
@@ -693,22 +826,30 @@ if template_file and list_file:
 
     confirm_col1, confirm_col2 = st.columns(2)
     with confirm_col1:
+        st.markdown(
+            '<div class="action-card"><strong>路径 A：确认无问题</strong><span>未填写问题时，可直接进入下一步。</span></div>',
+            unsafe_allow_html=True,
+        )
         if st.button(
-            "\u2705 \u6548\u679c\u6b63\u786e\uff0c\u7ee7\u7eed\u4e0b\u4e00\u6b65",
+            "✅ 无问题，直接下一步",
             type="primary",
             use_container_width=True,
             key="btn_preview_direct_next",
         ):
             report_text = st.session_state.get("preview_report", "").strip()
             if report_text:
-                st.warning("你已填写问题描述，请先点击“重新生成替换效果并检查”，确认无问题后再进入下一步。")
+                st.warning("你已填写问题描述，请先点击“有错误点击重新生成预览”，确认无问题后再进入下一步。")
                 st.session_state.preview_confirmed = False
             else:
                 st.session_state.preview_confirmed = True
                 st.rerun()
     with confirm_col2:
+        st.markdown(
+            '<div class="action-card"><strong>路径 B：发现问题先修复</strong><span>输入问题后，先重新生成预览并检查，再决定是否进入下一步。</span></div>',
+            unsafe_allow_html=True,
+        )
         report = st.text_input(
-            "\u274c \u8bf7\u68c0\u67e5\u66ff\u6362\u6548\u679c\u6709\u65e0\u9519\u8bef\uff1f\u8bf7\u63cf\u8ff0\u95ee\u9898\u3002",
+            "请描述发现的问题",
             placeholder="\u4f8b\u5982: \u5b57\u4f53\u504f\u5c0f / \u4f4d\u7f6e\u504f\u79fb / \u95f4\u8ddd\u4e0d\u5bf9...",
             key="preview_report",
         )
@@ -719,15 +860,25 @@ if template_file and list_file:
             st.session_state.single_check_issues = []
 
         if st.button(
-            "\u267b\ufe0f \u91cd\u65b0\u751f\u6210\u66ff\u6362\u6548\u679c\u5e76\u68c0\u67e5\uff08\u5355\u5f20\u9884\u89c8\uff09",
+            "有错误点击重新生成预览",
             use_container_width=True,
             key="btn_preview_regen_check",
         ):
             if report_text:
                 regen_img = generate_one(bg, build_text_items(first), img_width, font_color, font_path)
                 st.session_state["regen_preview"] = regen_img
-                issues = check_image_quality(regen_img, build_text_items(first), img_width, qr_box, font_path)
-                st.session_state.single_check_issues = issues
+                text_items_now = build_text_items(first)
+                basic_issues = check_image_quality(regen_img, text_items_now, img_width, qr_box, font_path)
+                diff_issues = compare_preview_quality(
+                    original_img,
+                    regen_img,
+                    text_items_now,
+                    img_width,
+                    qr_box,
+                    font_path,
+                    use_custom_font=bool(custom_font_file),
+                )
+                st.session_state.single_check_issues = basic_issues + diff_issues
                 st.session_state.single_check_done = True
                 st.session_state.checked_report = report_text
                 st.session_state.preview_confirmed = False
@@ -735,7 +886,7 @@ if template_file and list_file:
             else:
                 st.warning("\u8bf7\u5148\u5728\u4e0a\u65b9\u8f93\u5165\u95ee\u9898\u63cf\u8ff0\uff0c\u518d\u70b9\u51fb\u91cd\u65b0\u751f\u6210\u3002")
         st.caption(
-            "\u5907\u6ce8\uff1a\u63cf\u8ff0\u5b8c\u95ee\u9898\u540e\uff0c\u8bf7\u70b9\u51fb\u201c\u91cd\u65b0\u751f\u6210\u66ff\u6362\u6548\u679c\u5e76\u68c0\u67e5\uff08\u5355\u5f20\u9884\u89c8\uff09\u201d\uff0c\u786e\u8ba4\u65e0\u8bef\u540e\u518d\u8fdb\u884c\u4e0b\u4e00\u6b65\u3002"
+            "操作提示：先描述问题，再点“有错误点击重新生成预览”。检查通过后再进入下一步。"
         )
         if report_text:
             st.warning(f"\u4f60\u53cd\u9988\u7684\u95ee\u9898: \u300c{report}\u300d")
@@ -757,7 +908,7 @@ if template_file and list_file:
                 action_col1, action_col2 = st.columns(2)
                 with action_col1:
                     if st.button(
-                        "\u26a0\ufe0f \u6709\u95ee\u9898\uff0c\u7ee7\u7eed\u751f\u6210\u4fee\u590d\u9884\u89c8",
+                        "有问题继续生成修复预览",
                         use_container_width=True,
                         key="btn_preview_continue_fix",
                     ):
@@ -766,23 +917,23 @@ if template_file and list_file:
                         st.rerun()
                 with action_col2:
                     if st.button(
-                        "\u2705 \u65e0\u95ee\u9898\uff0c\u8fdb\u884c\u4e0b\u4e00\u6b65",
+                        "无问题，进行下一步",
                         type="primary",
                         use_container_width=True,
                         key="btn_preview_no_issue_next",
                     ):
-                        if has_errors or has_warnings:
-                            st.error("仍存在检测问题，请继续修复后再进行下一步。")
+                        if has_errors:
+                            st.error("仍存在错误项，请继续修复后再进行下一步。")
                             st.session_state.preview_confirmed = False
                         else:
                             st.session_state.preview_confirmed = True
                             st.rerun()
             else:
-                st.info("请先点击“重新生成替换效果并检查（单张预览）”，确认问题是否已解决。")
+                st.info("请先点击“有错误点击重新生成预览”，确认问题是否已解决。")
 
     if not st.session_state.preview_confirmed:
         if st.session_state.get("preview_report", "").strip():
-            st.info("已记录问题，请先重新生成并检查；确认无问题后点击“无问题，进行下一步”。")
+            st.info("已记录问题，请先点击“有错误点击重新生成预览”；确认无问题后点击“无问题，进行下一步”。")
         else:
             st.info("\u8bf7\u5148\u786e\u8ba4\u4e0a\u65b9\u9884\u89c8\u6548\u679c\u65e0\u8bef\uff0c\u624d\u80fd\u7ee7\u7eed\u4e0b\u4e00\u6b65")
         st.stop()

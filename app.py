@@ -383,42 +383,49 @@ def parse_spreadsheet(uploaded):
 
 st.markdown('<div class="apple-section-title">第一步：上传文件</div>', unsafe_allow_html=True)
 
-col1, col2 = st.columns(2)
-with col1:
+upload_col1, upload_col2, upload_col3 = st.columns(3)
+with upload_col1:
     template_file = st.file_uploader(
-        "1. \u4e0a\u4f20\u6a21\u677f\u6587\u4ef6",
+        "1. 上传模板文件",
         type=ALL_TEMPLATE_TYPES,
         help="PSD / PSB / PNG / JPG / TIFF / BMP / WebP / PDF / EPS / AI",
     )
-with col2:
+    st.markdown(
+        '<div class="apple-info-card"><strong>模板文件规则</strong>'
+        '<span>支持 PSD、PSB、PNG、JPG、AI、PDF 等格式。建议优先使用原始设计稿，图层识别更准确。</span>'
+        '<br><span style="font-size:0.84rem;color:rgba(128,128,132,0.75);">如需修改模板，重新上传即可覆盖当前文件。</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+with upload_col2:
     list_file = st.file_uploader(
-        "2. \u4e0a\u4f20\u540d\u5355",
+        "2. 上传名单",
         type=LIST_EXTENSIONS,
         help="CSV / Excel (.xlsx) / Excel (.xls)",
     )
+    st.markdown(
+        '<div class="apple-info-card"><strong>名单规则</strong>'
+        '<span>支持 CSV、XLSX、XLS。建议至少包含“公司名”和“人名”字段，自动识别更准确。</span>'
+        '<br><span style="font-size:0.84rem;color:rgba(128,128,132,0.75);">如需修正数据，重新上传名单文件即可生效。</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
-qr_file = st.file_uploader(
-    "3. \u4e0a\u4f20\u66ff\u6362\u4e8c\u7ef4\u7801 (\u53ef\u9009)",
-    type=["png", "jpg", "jpeg", "webp"],
-)
-st.caption("上传方式：可拖拽文件到上传框，或点击“Browse files / 选择文件”按钮上传。")
+with upload_col3:
+    qr_file = st.file_uploader(
+        "3. 上传替换二维码（可选）",
+        type=["png", "jpg", "jpeg", "webp"],
+    )
+    st.markdown(
+        '<div class="apple-info-card"><strong>二维码规则</strong>'
+        '<span>可选项。不上传则保留模板原二维码；上传后按模板位置自动替换并保留圆角效果。</span>'
+        '<br><span style="font-size:0.84rem;color:rgba(128,128,132,0.75);">如需更换二维码，重新上传图片即可覆盖。</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
-tip_col1, tip_col2, tip_col3 = st.columns(3)
-with tip_col1:
-    st.markdown(
-        '<div class="apple-info-card"><strong>模板文件</strong><span>支持 PSD、PSB、PNG、JPG、AI、PDF 等格式，建议优先使用原始设计稿。</span></div>',
-        unsafe_allow_html=True,
-    )
-with tip_col2:
-    st.markdown(
-        '<div class="apple-info-card"><strong>名单文件</strong><span>支持 CSV、XLSX、XLS。建议包含“公司名”和“人名”字段，自动识别更准确。</span></div>',
-        unsafe_allow_html=True,
-    )
-with tip_col3:
-    st.markdown(
-        '<div class="apple-info-card"><strong>二维码替换</strong><span>可选项。不上传则保留原二维码，上传后会按模板位置和圆角自动替换。</span></div>',
-        unsafe_allow_html=True,
-    )
+st.caption("上传方式：可拖拽文件到上传框，或点击“选择文件”按钮上传。")
 
 if template_file and list_file:
     suffix = file_suffix(template_file)
@@ -663,12 +670,13 @@ if template_file and list_file:
     st.markdown('<div class="apple-section-title">第三步：预览与生成</div>', unsafe_allow_html=True)
     first = rows[0]
     preview = generate_one(bg, build_text_items(first), img_width, font_color, font_path)
+    preview_show = st.session_state.get("regen_preview", preview)
 
     pcol1, pcol2 = st.columns(2)
     with pcol1:
         st.image(original_img, caption="\u539f\u59cb\u6a21\u677f", use_container_width=True)
     with pcol2:
-        st.image(preview, caption=f"\u66ff\u6362\u6548\u679c: {build_filename(first)}",
+        st.image(preview_show, caption=f"\u66ff\u6362\u6548\u679c: {build_filename(first)}",
                  use_container_width=True)
 
     st.markdown("---")
@@ -676,22 +684,107 @@ if template_file and list_file:
 
     if "preview_confirmed" not in st.session_state:
         st.session_state.preview_confirmed = False
+    if "single_check_done" not in st.session_state:
+        st.session_state.single_check_done = False
+    if "single_check_issues" not in st.session_state:
+        st.session_state.single_check_issues = []
+    if "checked_report" not in st.session_state:
+        st.session_state.checked_report = ""
 
     confirm_col1, confirm_col2 = st.columns(2)
     with confirm_col1:
-        if st.button("\u2705 \u6548\u679c\u6b63\u786e\uff0c\u7ee7\u7eed\u4e0b\u4e00\u6b65", type="primary", use_container_width=True):
-            st.session_state.preview_confirmed = True
-            st.rerun()
+        if st.button(
+            "\u2705 \u6548\u679c\u6b63\u786e\uff0c\u7ee7\u7eed\u4e0b\u4e00\u6b65",
+            type="primary",
+            use_container_width=True,
+            key="btn_preview_direct_next",
+        ):
+            report_text = st.session_state.get("preview_report", "").strip()
+            if report_text:
+                st.warning("你已填写问题描述，请先点击“重新生成替换效果并检查”，确认无问题后再进入下一步。")
+                st.session_state.preview_confirmed = False
+            else:
+                st.session_state.preview_confirmed = True
+                st.rerun()
     with confirm_col2:
-        report = st.text_input("\u274c \u53d1\u73b0\u9519\u8bef\uff1f\u8bf7\u63cf\u8ff0\u95ee\u9898", placeholder="\u4f8b\u5982: \u5b57\u4f53\u504f\u5c0f / \u4f4d\u7f6e\u504f\u79fb / \u95f4\u8ddd\u4e0d\u5bf9...")
-        if report:
+        report = st.text_input(
+            "\u274c \u8bf7\u68c0\u67e5\u66ff\u6362\u6548\u679c\u6709\u65e0\u9519\u8bef\uff1f\u8bf7\u63cf\u8ff0\u95ee\u9898\u3002",
+            placeholder="\u4f8b\u5982: \u5b57\u4f53\u504f\u5c0f / \u4f4d\u7f6e\u504f\u79fb / \u95f4\u8ddd\u4e0d\u5bf9...",
+            key="preview_report",
+        )
+        report_text = report.strip()
+
+        if report_text != st.session_state.get("checked_report", ""):
+            st.session_state.single_check_done = False
+            st.session_state.single_check_issues = []
+
+        if st.button(
+            "\u267b\ufe0f \u91cd\u65b0\u751f\u6210\u66ff\u6362\u6548\u679c\u5e76\u68c0\u67e5\uff08\u5355\u5f20\u9884\u89c8\uff09",
+            use_container_width=True,
+            key="btn_preview_regen_check",
+        ):
+            if report_text:
+                regen_img = generate_one(bg, build_text_items(first), img_width, font_color, font_path)
+                st.session_state["regen_preview"] = regen_img
+                issues = check_image_quality(regen_img, build_text_items(first), img_width, qr_box, font_path)
+                st.session_state.single_check_issues = issues
+                st.session_state.single_check_done = True
+                st.session_state.checked_report = report_text
+                st.session_state.preview_confirmed = False
+                st.rerun()
+            else:
+                st.warning("\u8bf7\u5148\u5728\u4e0a\u65b9\u8f93\u5165\u95ee\u9898\u63cf\u8ff0\uff0c\u518d\u70b9\u51fb\u91cd\u65b0\u751f\u6210\u3002")
+        st.caption(
+            "\u5907\u6ce8\uff1a\u63cf\u8ff0\u5b8c\u95ee\u9898\u540e\uff0c\u8bf7\u70b9\u51fb\u201c\u91cd\u65b0\u751f\u6210\u66ff\u6362\u6548\u679c\u5e76\u68c0\u67e5\uff08\u5355\u5f20\u9884\u89c8\uff09\u201d\uff0c\u786e\u8ba4\u65e0\u8bef\u540e\u518d\u8fdb\u884c\u4e0b\u4e00\u6b65\u3002"
+        )
+        if report_text:
             st.warning(f"\u4f60\u53cd\u9988\u7684\u95ee\u9898: \u300c{report}\u300d")
-            st.info("\u8bf7\u8c03\u6574\u4e0a\u65b9\u7684\u5b57\u6bb5\u6620\u5c04\u6216\u5b57\u4f53\u8bbe\u7f6e\u540e\uff0c\u9875\u9762\u4f1a\u81ea\u52a8\u66f4\u65b0\u9884\u89c8\u3002\u786e\u8ba4\u65e0\u8bef\u540e\u518d\u70b9\u201c\u6548\u679c\u6b63\u786e\u201d\u3002")
-            st.session_state.preview_confirmed = False
-            st.stop()
+            if st.session_state.single_check_done and st.session_state.get("checked_report", "") == report_text:
+                has_errors = False
+                has_warnings = False
+                if not st.session_state.single_check_issues:
+                    st.success("本次检查未发现问题。")
+                for level, msg in st.session_state.single_check_issues:
+                    if level == "error":
+                        has_errors = True
+                        st.error(msg)
+                    elif level == "warning":
+                        has_warnings = True
+                        st.warning(msg)
+                    elif level == "success":
+                        st.success(msg)
+
+                action_col1, action_col2 = st.columns(2)
+                with action_col1:
+                    if st.button(
+                        "\u26a0\ufe0f \u6709\u95ee\u9898\uff0c\u7ee7\u7eed\u751f\u6210\u4fee\u590d\u9884\u89c8",
+                        use_container_width=True,
+                        key="btn_preview_continue_fix",
+                    ):
+                        st.session_state.single_check_done = False
+                        st.session_state.preview_confirmed = False
+                        st.rerun()
+                with action_col2:
+                    if st.button(
+                        "\u2705 \u65e0\u95ee\u9898\uff0c\u8fdb\u884c\u4e0b\u4e00\u6b65",
+                        type="primary",
+                        use_container_width=True,
+                        key="btn_preview_no_issue_next",
+                    ):
+                        if has_errors or has_warnings:
+                            st.error("仍存在检测问题，请继续修复后再进行下一步。")
+                            st.session_state.preview_confirmed = False
+                        else:
+                            st.session_state.preview_confirmed = True
+                            st.rerun()
+            else:
+                st.info("请先点击“重新生成替换效果并检查（单张预览）”，确认问题是否已解决。")
 
     if not st.session_state.preview_confirmed:
-        st.info("\u8bf7\u5148\u786e\u8ba4\u4e0a\u65b9\u9884\u89c8\u6548\u679c\u65e0\u8bef\uff0c\u624d\u80fd\u7ee7\u7eed\u4e0b\u4e00\u6b65")
+        if st.session_state.get("preview_report", "").strip():
+            st.info("已记录问题，请先重新生成并检查；确认无问题后点击“无问题，进行下一步”。")
+        else:
+            st.info("\u8bf7\u5148\u786e\u8ba4\u4e0a\u65b9\u9884\u89c8\u6548\u679c\u65e0\u8bef\uff0c\u624d\u80fd\u7ee7\u7eed\u4e0b\u4e00\u6b65")
         st.stop()
 
     # ── step 1: preview samples ──

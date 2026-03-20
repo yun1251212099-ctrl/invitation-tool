@@ -80,32 +80,18 @@ st.markdown(
     [data-testid="stFileUploaderDropzone"] {
         border-radius: 14px;
         border: 1px solid rgba(120, 120, 128, 0.35);
-        padding-top: 0.4rem;
-        padding-bottom: 0.4rem;
+        padding-top: 0.45rem;
+        padding-bottom: 0.45rem;
     }
     [data-testid="stFileUploaderDropzoneInstructions"] {
-        font-size: 0 !important;
+        display: none;
     }
-    [data-testid="stFileUploaderDropzoneInstructions"]::before {
-        content: "将文件拖到此处，或点击“选择文件”";
-        display: block;
-        font-size: 1.2rem;
-        font-weight: 600;
-        margin-bottom: 0.25rem;
-    }
-    [data-testid="stFileUploaderDropzoneInstructions"]::after {
-        content: "支持批量上传，单个文件最大 2GB";
-        display: block;
-        font-size: 0.95rem;
-        color: rgba(250, 250, 250, 0.72);
+    [data-testid="stFileUploader"] small {
+        font-size: 0.9rem;
+        color: rgba(128, 128, 132, 0.92);
     }
     [data-testid="stFileUploaderDropzone"] button {
-        font-size: 0 !important;
-    }
-    [data-testid="stFileUploaderDropzone"] button::after {
-        content: "选择文件";
-        font-size: 1.15rem;
-        font-weight: 600;
+        border-radius: 10px;
     }
     [data-testid="stButton"] > button {
         border-radius: 12px;
@@ -415,6 +401,7 @@ qr_file = st.file_uploader(
     "3. \u4e0a\u4f20\u66ff\u6362\u4e8c\u7ef4\u7801 (\u53ef\u9009)",
     type=["png", "jpg", "jpeg", "webp"],
 )
+st.caption("上传方式：可拖拽文件到上传框，或点击“Browse files / 选择文件”按钮上传。")
 
 tip_col1, tip_col2, tip_col3 = st.columns(3)
 with tip_col1:

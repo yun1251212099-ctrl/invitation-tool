@@ -18,13 +18,71 @@ from psd_tools import PSDImage
 APP_DIR = Path(__file__).parent
 FONTS_DIR = APP_DIR / "fonts"
 
-st.set_page_config(page_title="批量邀请函生成", page_icon="📨", layout="centered")
-st.title("批量邀请函生成工具")
+st.set_page_config(page_title="批量邀请函生成", page_icon="📨", layout="wide")
+st.markdown(
+    """
+    <div class="apple-hero">
+      <h1>批量邀请函生成工具</h1>
+      <p>上传模板与名单，预览确认后一键批量生成并下载压缩包。</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
-# Streamlit 内建上传组件默认是英文，这里统一覆盖成简体中文提示。
+# Streamlit 内建上传组件默认是英文，这里统一覆盖成简体中文提示，并优化界面层级。
 st.markdown(
     """
     <style>
+    .block-container {
+        max-width: 1200px;
+        padding-top: 1.25rem;
+        padding-bottom: 3rem;
+    }
+    .apple-hero {
+        padding: 1.1rem 0 0.6rem 0;
+        border-bottom: 1px solid rgba(120, 120, 128, 0.25);
+        margin-bottom: 1rem;
+    }
+    .apple-hero h1 {
+        font-size: clamp(2rem, 4vw, 3rem);
+        line-height: 1.15;
+        letter-spacing: -0.02em;
+        margin: 0;
+    }
+    .apple-hero p {
+        margin-top: 0.55rem;
+        margin-bottom: 0.25rem;
+        font-size: 1.05rem;
+        color: rgba(128, 128, 132, 0.95);
+    }
+    .apple-section-title {
+        margin: 1.1rem 0 0.35rem 0;
+        font-size: 1.3rem;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+    }
+    .apple-info-card {
+        border: 1px solid rgba(120, 120, 128, 0.3);
+        border-radius: 14px;
+        padding: 0.8rem 0.95rem;
+        margin: 0.2rem 0 0.8rem 0;
+        background: rgba(120, 120, 128, 0.08);
+    }
+    .apple-info-card strong {
+        display: block;
+        margin-bottom: 0.25rem;
+        font-size: 1rem;
+    }
+    .apple-info-card span {
+        font-size: 0.92rem;
+        color: rgba(128, 128, 132, 0.95);
+    }
+    [data-testid="stFileUploaderDropzone"] {
+        border-radius: 14px;
+        border: 1px solid rgba(120, 120, 128, 0.35);
+        padding-top: 0.4rem;
+        padding-bottom: 0.4rem;
+    }
     [data-testid="stFileUploaderDropzoneInstructions"] {
         font-size: 0 !important;
     }
@@ -48,6 +106,14 @@ st.markdown(
         content: "选择文件";
         font-size: 1.15rem;
         font-weight: 600;
+    }
+    [data-testid="stButton"] > button {
+        border-radius: 12px;
+        min-height: 2.7rem;
+    }
+    [data-testid="stDownloadButton"] > button {
+        border-radius: 12px;
+        min-height: 2.8rem;
     }
     </style>
     """,
@@ -329,7 +395,7 @@ def parse_spreadsheet(uploaded):
 
 # ── UI ───────────────────────────────────────────────────
 
-st.markdown("---")
+st.markdown('<div class="apple-section-title">第一步：上传文件</div>', unsafe_allow_html=True)
 
 col1, col2 = st.columns(2)
 with col1:
@@ -350,15 +416,22 @@ qr_file = st.file_uploader(
     type=["png", "jpg", "jpeg", "webp"],
 )
 
-st.caption(
-    "\u6a21\u677f\u6587\u4ef6\uff1a\u652f\u6301 PSD/PSB/\u56fe\u7247/\u77e2\u91cf\u683c\u5f0f\uff0c\u5efa\u8bae\u4f7f\u7528\u539f\u8bbe\u8ba1\u7a3f\uff0c\u8bc6\u522b\u66f4\u51c6\u786e\u3002"
-)
-st.caption(
-    "\u540d\u5355\u6587\u4ef6\uff1a\u652f\u6301 CSV/XLSX/XLS\uff0c\u5efa\u8bae\u5305\u542b\u201c\u516c\u53f8\u540d\u201d\u548c\u201c\u4eba\u540d\u201d\u5b57\u6bb5\u3002"
-)
-st.caption(
-    "\u4e8c\u7ef4\u7801\uff08\u53ef\u9009\uff09\uff1a\u4e0d\u4e0a\u4f20\u5219\u4fdd\u7559\u6a21\u677f\u539f\u7801\uff0c\u4e0a\u4f20\u540e\u6309\u539f\u4f4d\u7f6e\u81ea\u52a8\u66ff\u6362\u3002"
-)
+tip_col1, tip_col2, tip_col3 = st.columns(3)
+with tip_col1:
+    st.markdown(
+        '<div class="apple-info-card"><strong>模板文件</strong><span>支持 PSD、PSB、PNG、JPG、AI、PDF 等格式，建议优先使用原始设计稿。</span></div>',
+        unsafe_allow_html=True,
+    )
+with tip_col2:
+    st.markdown(
+        '<div class="apple-info-card"><strong>名单文件</strong><span>支持 CSV、XLSX、XLS。建议包含“公司名”和“人名”字段，自动识别更准确。</span></div>',
+        unsafe_allow_html=True,
+    )
+with tip_col3:
+    st.markdown(
+        '<div class="apple-info-card"><strong>二维码替换</strong><span>可选项。不上传则保留原二维码，上传后会按模板位置和圆角自动替换。</span></div>',
+        unsafe_allow_html=True,
+    )
 
 if template_file and list_file:
     suffix = file_suffix(template_file)
@@ -403,6 +476,11 @@ if template_file and list_file:
         info_parts.append(f"模板尺寸 {img_width}x{img_height}")
     info_parts.append(f"名单共 {len(rows)} 条记录")
     st.success(f"解析完成：{'，'.join(info_parts)}")
+    m1, m2 = st.columns(2)
+    with m1:
+        st.metric("名单记录数", len(rows))
+    with m2:
+        st.metric("模板宽度", img_width)
 
     # ── auto-detect fields ──
     COMPANY_KEYWORDS = ["company", "\u516c\u53f8", "\u5355\u4f4d", "\u673a\u6784", "\u4f01\u4e1a", "\u7ec4\u7ec7"]
@@ -431,7 +509,7 @@ if template_file and list_file:
     psd_name_layer_idx = auto_detect_layer(layer_names, NAME_KEYWORDS) if is_psd else None
 
     # ── field mapping UI ──
-    st.markdown("### \u5b57\u6bb5\u6620\u5c04")
+    st.markdown('<div class="apple-section-title">第二步：字段映射与样式设置</div>', unsafe_allow_html=True)
 
     if has_company_field and has_name_field:
         st.info(f"\u5df2\u81ea\u52a8\u8bc6\u522b: \u516c\u53f8\u540d=\u300c{fields[company_idx]}\u300d, \u4eba\u540d=\u300c{fields[name_idx]}\u300d")
@@ -595,7 +673,7 @@ if template_file and list_file:
         return "_".join(parts) if parts else f"row"
 
     # ── preview: original vs first ──
-    st.markdown("### \u9884\u89c8\u5bf9\u6bd4")
+    st.markdown('<div class="apple-section-title">第三步：预览与生成</div>', unsafe_allow_html=True)
     first = rows[0]
     preview = generate_one(bg, build_text_items(first), img_width, font_color, font_path)
 

@@ -952,6 +952,7 @@ if template_file and list_file:
     if st.button("\u751f\u6210\u9884\u89c8", type="secondary", use_container_width=True):
         preview_imgs = []
         all_issues = []
+        st.session_state["preview_gallery_confirmed"] = False
         progress = st.progress(0, text="\u6b63\u5728\u751f\u6210\u9884\u89c8...")
         for i in range(preview_count):
             row = rows[i]
@@ -988,16 +989,29 @@ if template_file and list_file:
                      use_container_width=False)
 
         st.markdown("---")
-        if st.button("\u267b\ufe0f \u91cd\u65b0\u751f\u6210\u9884\u89c8", use_container_width=True):
-            for k in ["preview_imgs", "preview_issues", "all_img_data", "check_done"]:
-                st.session_state.pop(k, None)
-            st.rerun()
+        if "preview_gallery_confirmed" not in st.session_state:
+            st.session_state["preview_gallery_confirmed"] = False
+
+        op_col1, op_col2 = st.columns(2)
+        with op_col1:
+            if st.button("有错误点击重新生成预览", use_container_width=True, key="btn_regen_preview_gallery"):
+                st.session_state["preview_gallery_confirmed"] = False
+                for k in ["preview_imgs", "preview_issues", "all_img_data", "check_done"]:
+                    st.session_state.pop(k, None)
+                st.rerun()
+        with op_col2:
+            if st.button("无问题确认效果", type="primary", use_container_width=True, key="btn_confirm_preview_gallery"):
+                st.session_state["preview_gallery_confirmed"] = True
+                st.success("已确认预览效果无问题，可以继续生成全部。")
 
         # ── generate all ──
         st.markdown("---")
         st.markdown("### \u751f\u6210\u5168\u90e8")
+        if not st.session_state.get("preview_gallery_confirmed", False):
+            st.info("请先点击“无问题确认效果”，再进行全部生成。")
         if st.button(f"\u751f\u6210\u5168\u90e8 {total} \u5f20",
-                     type="primary", use_container_width=True):
+                     type="primary", use_container_width=True,
+                     disabled=not st.session_state.get("preview_gallery_confirmed", False)):
             progress2 = st.progress(0, text="\u6b63\u5728\u751f\u6210...")
             all_img_data = []
             for i, row in enumerate(rows):

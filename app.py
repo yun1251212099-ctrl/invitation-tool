@@ -20,6 +20,16 @@ FONTS_DIR = APP_DIR / "fonts"
 
 st.set_page_config(page_title="批量邀请函生成", page_icon="📨", layout="centered")
 st.title("批量邀请函生成工具")
+with st.expander("\u540c\u4e8b\u7aef\u7ea2\u6846\u62a5\u9519\u6392\u67e5", expanded=False):
+    st.markdown(
+        "- `TypeError: Failed to fetch dynamically imported module` \u901a\u5e38\u662f\u6d4f\u89c8\u5668\u7f13\u5b58\u6216\u7f51\u7edc\u963b\u62e6\u5bfc\u81f4\u3002\n"
+        "- \u8bf7\u4f9d\u6b21\u5c1d\u8bd5\uff1a\u5173\u95ed\u9875\u9762\u91cd\u5f00 \u2192 \u5f3a\u5236\u5237\u65b0 (Win: `Ctrl+Shift+R`, macOS: `Cmd+Shift+R`) \u2192 \u65e0\u75d5\u6a21\u5f0f\u3002\n"
+        "- \u4ecd\u5931\u8d25\u65f6\uff0c\u6e05\u9664 `streamlit.app` \u7ad9\u70b9\u6570\u636e\u540e\u91cd\u8bd5\u3002\n"
+        "- \u82e5\u516c\u53f8\u7f51\u7edc\u4e0d\u884c\u3001\u624b\u673a\u7f51\u7edc\u53ef\u4ee5\uff0c\u8bf7 IT \u653e\u884c `*.streamlit.app` HTTPS \u8bbf\u95ee\u3002"
+    )
+st.caption(
+    "\u516c\u7f51\u8bf4\u660e\uff1aStreamlit Cloud \u90e8\u7f72\u6210\u529f\u540e\uff0c\u4e0d\u540c\u7f51\u7edc\u548c\u5728\u5bb6\u4e00\u822c\u90fd\u53ef\u6253\u5f00\u4f7f\u7528\uff08\u9664\u975e\u5f53\u5730/\u516c\u53f8\u7f51\u7edc\u5bf9\u8be5\u57df\u540d\u6709\u9650\u5236\uff09\u3002"
+)
 
 # ── password gate ────────────────────────────────────────
 import hashlib

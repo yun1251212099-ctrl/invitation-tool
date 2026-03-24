@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
+from pilmoji import Pilmoji
 from psd_tools import PSDImage
 
 APP_DIR = Path(__file__).parent
@@ -348,6 +349,18 @@ def get_text_layer_positions(psd, font_path=None):
     return positions
 
 
+import re as _re
+_EMOJI_RE = _re.compile(
+    "[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF"
+    "\U0001F1E0-\U0001F1FF\U00002702-\U000027B0\U0001F900-\U0001F9FF"
+    "\U0001FA00-\U0001FA6F\U0001FA70-\U0001FAFF\U00002600-\U000026FF"
+    "\U0000FE00-\U0000FE0F\U0000200D]+")
+
+
+def _has_emoji(text):
+    return bool(_EMOJI_RE.search(text))
+
+
 def draw_centered_text(draw, font, text, center_y, img_width, color, stroke_width=0):
     """Draw text horizontally and vertically centered using standard draw.text."""
     bbox = font.getbbox(text)
@@ -361,16 +374,34 @@ def draw_centered_text(draw, font, text, center_y, img_width, color, stroke_widt
         draw.text((x, y), text, font=font, fill=color)
 
 
+def _draw_centered_emoji(img, font, text, center_y, img_width, color, stroke_width=0):
+    """Draw text with emoji support using pilmoji."""
+    bbox = font.getbbox(text)
+    text_w = bbox[2] - bbox[0]
+    x = (img_width - text_w) // 2
+    y = center_y - (bbox[1] + bbox[3]) // 2
+    with Pilmoji(img) as pmj:
+        if stroke_width > 0:
+            pmj.text((x, y), text, font=font, fill=color,
+                     stroke_width=stroke_width, stroke_fill=color)
+        else:
+            pmj.text((x, y), text, font=font, fill=color)
+
+
 def generate_one(background, text_items, img_width, color, font_path):
     """text_items: list of (text_str, center_y, font_size[, stroke_width])."""
     img = background.copy()
     draw = ImageDraw.Draw(img)
+    use_emoji = any(_has_emoji(item[0]) for item in text_items if item[0])
     for item in text_items:
         text, cy, fsize = item[0], item[1], item[2]
         sw = item[3] if len(item) > 3 else 0
         if text:
             f = ImageFont.truetype(font_path, fsize)
-            draw_centered_text(draw, f, text, cy, img_width, color, stroke_width=sw)
+            if use_emoji and _has_emoji(text):
+                _draw_centered_emoji(img, f, text, cy, img_width, color, stroke_width=sw)
+            else:
+                draw_centered_text(draw, f, text, cy, img_width, color, stroke_width=sw)
     return img
 
 

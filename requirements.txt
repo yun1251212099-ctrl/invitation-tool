@@ -6,3 +6,4 @@ numpy
 openpyxl
 xlrd
 opencv-python-headless
+pilmoji

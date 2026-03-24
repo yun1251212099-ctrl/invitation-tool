@@ -234,6 +234,20 @@ def detect_qr_region(psd):
     return None
 
 
+def extract_qr_mask(psd):
+    """Extract the real alpha mask from the QR smart object layer."""
+    qr_layer = get_qr_layer(psd)
+    if qr_layer is None:
+        return None
+    try:
+        layer_img = qr_layer.composite()
+        if layer_img and layer_img.mode == "RGBA":
+            return layer_img.split()[3]
+    except Exception:
+        pass
+    return None
+
+
 def composite_background(psd):
     for l in psd.descendants():
         if l.kind == "type":
@@ -256,11 +270,14 @@ def rounded_corner_mask(size, radius):
     return mask
 
 
-def replace_qr(background, qr_image, qr_box, corner_radius=3):
+def replace_qr(background, qr_image, qr_box, real_mask=None, corner_radius=3):
     tw = qr_box[2] - qr_box[0]
     th = qr_box[3] - qr_box[1]
     qr_resized = qr_image.convert("RGBA").resize((tw, th), Image.LANCZOS)
-    mask = rounded_corner_mask((tw, th), corner_radius)
+    if real_mask is not None:
+        mask = real_mask.resize((tw, th), Image.LANCZOS)
+    else:
+        mask = rounded_corner_mask((tw, th), corner_radius)
     bg_region = background.crop(qr_box).convert("RGBA")
     composite = Image.composite(qr_resized, bg_region, mask)
     background.paste(composite, (qr_box[0], qr_box[1]))
@@ -605,6 +622,7 @@ if template_file and list_file:
             font_color = get_font_color(psd)
             font_size = 51
             qr_box = detect_qr_region(psd)
+            qr_real_mask = extract_qr_mask(psd)
             original_img = psd.composite()
             bg = composite_background(psd)
             img_width = psd.width
@@ -619,6 +637,7 @@ if template_file and list_file:
             font_size = 51
             font_color = (255, 255, 255, 255)
             qr_box = None
+            qr_real_mask = None
             layer_names = []
             positions = {}
 
@@ -816,7 +835,7 @@ if template_file and list_file:
     # ── QR replacement ──
     if qr_file and qr_box:
         qr_img = Image.open(qr_file).convert("RGBA")
-        bg = replace_qr(bg, qr_img, qr_box)
+        bg = replace_qr(bg, qr_img, qr_box, real_mask=qr_real_mask)
 
     def build_text_items(row):
         items = []

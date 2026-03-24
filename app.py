@@ -295,7 +295,11 @@ def get_font_color(psd):
 
 
 def get_text_layer_positions(psd, font_path=None):
-    """Return {layer_name: (center_y, calibrated_font_size, psd_width)}."""
+    """Return {layer_name: (center_y, calibrated_font_size, psd_width, stroke_width)}.
+
+    stroke_width is derived from PSD FauxBold flag or bold font variant name,
+    simulating Photoshop's bold rendering in Pillow via stroke.
+    """
     positions = {}
     for l in psd.descendants():
         if l.kind == "type":
@@ -305,27 +309,51 @@ def get_text_layer_positions(psd, font_path=None):
             cal_size = int(raw_size)
             if font_path and l.height > 0 and len(l.text) >= 1:
                 cal_size = calibrate_font_size(font_path, l.text, l.height, raw_size)
-            positions[l.name] = (cy, cal_size, l.width)
+
+            stroke_w = 0
+            faux_bold = ss.get("FauxBold", False)
+            if faux_bold:
+                stroke_w = max(1, round(cal_size / 36))
+
+            if stroke_w == 0:
+                try:
+                    fs = l.engine_dict.get("ResourceDict", {}).get("FontSet", [])
+                    font_idx = int(ss.get("Font", 0))
+                    if font_idx < len(fs):
+                        ps_name = fs[font_idx].get("Name", "").lower()
+                        if any(w in ps_name for w in
+                               ["bold", "heavy", "black", "semibold", "demibold"]):
+                            stroke_w = max(1, round(cal_size / 36))
+                except Exception:
+                    pass
+
+            positions[l.name] = (cy, cal_size, l.width, stroke_w)
     return positions
 
 
-def draw_centered_text(draw, font, text, center_y, img_width, color):
+def draw_centered_text(draw, font, text, center_y, img_width, color, stroke_width=0):
     """Draw text horizontally and vertically centered using standard draw.text."""
     bbox = font.getbbox(text)
     text_w = bbox[2] - bbox[0]
     x = (img_width - text_w) // 2
     y = center_y - (bbox[1] + bbox[3]) // 2
-    draw.text((x, y), text, font=font, fill=color)
+    if stroke_width > 0:
+        draw.text((x, y), text, font=font, fill=color,
+                  stroke_width=stroke_width, stroke_fill=color)
+    else:
+        draw.text((x, y), text, font=font, fill=color)
 
 
 def generate_one(background, text_items, img_width, color, font_path):
-    """text_items: list of (text_str, center_y, font_size)."""
+    """text_items: list of (text_str, center_y, font_size[, stroke_width])."""
     img = background.copy()
     draw = ImageDraw.Draw(img)
-    for text, cy, fsize in text_items:
+    for item in text_items:
+        text, cy, fsize = item[0], item[1], item[2]
+        sw = item[3] if len(item) > 3 else 0
         if text:
             f = ImageFont.truetype(font_path, fsize)
-            draw_centered_text(draw, f, text, cy, img_width, color)
+            draw_centered_text(draw, f, text, cy, img_width, color, stroke_width=sw)
     return img
 
 
@@ -333,7 +361,8 @@ def check_image_quality(img, text_items, img_width, qr_box, font_path):
     """Quality checks: text bounds, spacing vs PSD width, QR readability."""
     issues = []
 
-    for text, center_y, fsize in text_items:
+    for item in text_items:
+        text, center_y, fsize = item[0], item[1], item[2]
         if not text:
             continue
         f = ImageFont.truetype(font_path, fsize)
@@ -384,7 +413,8 @@ def compare_preview_quality(original_img, preview_img, text_items, img_width, qr
             issues.append(("warning", f"字体可能不是指定 OPPO 字体（当前: {Path(font_path).name}）"))
 
     # 1) 字体大小、字距、边距、居中、对齐 + 5) 空格
-    for text, center_y, fsize in text_items:
+    for item in text_items:
+        text, center_y, fsize = item[0], item[1], item[2]
         if not text:
             issues.append(("warning", "检测到空文本，可能导致内容缺失"))
             continue
@@ -416,7 +446,8 @@ def compare_preview_quality(original_img, preview_img, text_items, img_width, qr
             h, w, _ = ori_rgb.shape
             mask = np.ones((h, w), dtype=np.uint8)
 
-            for text, center_y, fsize in text_items:
+            for item in text_items:
+                text, center_y, fsize = item[0], item[1], item[2]
                 if not text:
                     continue
                 f = ImageFont.truetype(font_path, fsize)
@@ -658,9 +689,11 @@ if template_file and list_file:
     company_field = None
     company_y = 0
     company_fsize = font_size
+    company_stroke = 0
     name_field = None
     name_y = 0
     name_fsize = font_size
+    name_stroke = 0
     company_layer = None
     name_layer = None
 
@@ -675,6 +708,7 @@ if template_file and list_file:
                 company_layer = st.selectbox("\u516c\u53f8\u540d\u5bf9\u5e94 PSD \u56fe\u5c42", layer_names, index=cl_idx)
                 company_y = positions[company_layer][0]
                 company_fsize = positions[company_layer][1]
+                company_stroke = positions[company_layer][3]
             else:
                 company_y = st.number_input("\u516c\u53f8\u540d Y \u5750\u6807", 0, img_height, int(img_height * 0.45))
 
@@ -689,6 +723,7 @@ if template_file and list_file:
                 name_layer = st.selectbox("\u4eba\u540d\u5bf9\u5e94 PSD \u56fe\u5c42", layer_names, index=nl_idx)
                 name_y = positions[name_layer][0]
                 name_fsize = positions[name_layer][1]
+                name_stroke = positions[name_layer][3]
             else:
                 name_y = st.number_input("\u4eba\u540d Y \u5750\u6807", 0, img_height, int(img_height * 0.48))
 
@@ -786,9 +821,9 @@ if template_file and list_file:
     def build_text_items(row):
         items = []
         if enable_company and company_field:
-            items.append((row[company_field], company_y, company_fsize))
+            items.append((row[company_field], company_y, company_fsize, company_stroke))
         if enable_name and name_field:
-            items.append((row[name_field], name_y, name_fsize))
+            items.append((row[name_field], name_y, name_fsize, name_stroke))
         return items
 
     def build_filename(row):

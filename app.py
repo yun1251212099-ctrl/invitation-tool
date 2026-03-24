@@ -532,23 +532,63 @@ def compare_preview_quality(original_img, preview_img, text_items, img_width, qr
     except Exception:
         issues.append(("warning", "背景清晰度检查失败，请人工放大复核细节"))
 
-    # 4) 二维码清晰度与乱码
+    # 4) 二维码三重校验：图形结构 + 清晰度 + 乱码
     if qr_box:
         try:
             qx1, qy1, qx2, qy2 = qr_box
-            qr_crop = preview_img.crop((qx1, qy1, qx2, qy2)).convert("RGB")
-            qr_arr = np.array(qr_crop)
-            qr_gray = cv2.cvtColor(qr_arr, cv2.COLOR_RGB2GRAY)
-            qr_sharp = cv2.Laplacian(qr_gray, cv2.CV_64F).var()
-            if qr_sharp < 45:
-                issues.append(("warning", "二维码清晰度偏低，可能影响扫码"))
 
+            ori_qr = original_img.crop((qx1, qy1, qx2, qy2)).convert("L")
+            pre_qr = preview_img.crop((qx1, qy1, qx2, qy2)).convert("L")
+            ori_arr = np.array(ori_qr, dtype=np.float64)
+            pre_arr = np.array(pre_qr.resize(ori_qr.size, Image.LANCZOS), dtype=np.float64)
+
+            # 4a) 图形结构校对：与源文件 1:1 像素对比（SSIM 简化版）
+            mu_o, mu_p = ori_arr.mean(), pre_arr.mean()
+            sig_o = ori_arr.std()
+            sig_p = pre_arr.std()
+            cov = ((ori_arr - mu_o) * (pre_arr - mu_p)).mean()
+            c1, c2 = (0.01 * 255) ** 2, (0.03 * 255) ** 2
+            ssim = ((2 * mu_o * mu_p + c1) * (2 * cov + c2)) / \
+                   ((mu_o ** 2 + mu_p ** 2 + c1) * (sig_o ** 2 + sig_p ** 2 + c2))
+            if ssim > 0.85:
+                issues.append(("success", f"\u4e8c\u7ef4\u7801\u56fe\u5f62\u7ed3\u6784\u4e0e\u6e90\u6587\u4ef6\u4e00\u81f4 (SSIM={ssim:.3f})"))
+            elif ssim > 0.6:
+                issues.append(("warning", f"\u4e8c\u7ef4\u7801\u56fe\u5f62\u4e0e\u6e90\u6587\u4ef6\u5b58\u5728\u5dee\u5f02 (SSIM={ssim:.3f})\uff0c\u5efa\u8bae\u68c0\u67e5\u5706\u89d2/\u8fb9\u7f18"))
+            else:
+                issues.append(("error", f"\u4e8c\u7ef4\u7801\u56fe\u5f62\u4e0e\u6e90\u6587\u4ef6\u5dee\u5f02\u8fc7\u5927 (SSIM={ssim:.3f})\uff0c\u53ef\u80fd\u88ab\u7834\u574f"))
+
+            # 4b) 清晰度校对
+            pre_qr_rgb = np.array(preview_img.crop((qx1, qy1, qx2, qy2)).convert("RGB"))
+            qr_gray = cv2.cvtColor(pre_qr_rgb, cv2.COLOR_RGB2GRAY)
+            qr_sharp = cv2.Laplacian(qr_gray, cv2.CV_64F).var()
+            ori_qr_rgb = np.array(original_img.crop((qx1, qy1, qx2, qy2)).convert("RGB"))
+            ori_qr_gray = cv2.cvtColor(ori_qr_rgb, cv2.COLOR_RGB2GRAY)
+            ori_qr_sharp = cv2.Laplacian(ori_qr_gray, cv2.CV_64F).var()
+            if ori_qr_sharp > 0:
+                ratio = qr_sharp / ori_qr_sharp
+                if ratio > 0.85:
+                    issues.append(("success", f"\u4e8c\u7ef4\u7801\u6e05\u6670\u5ea6\u6b63\u5e38 ({ratio:.2f}x)"))
+                elif ratio > 0.5:
+                    issues.append(("warning", f"\u4e8c\u7ef4\u7801\u6e05\u6670\u5ea6\u4e0b\u964d ({ratio:.2f}x)\uff0c\u53ef\u80fd\u5f71\u54cd\u626b\u7801"))
+                else:
+                    issues.append(("error", f"\u4e8c\u7ef4\u7801\u6e05\u6670\u5ea6\u4e25\u91cd\u4e0b\u964d ({ratio:.2f}x)"))
+            elif qr_sharp < 45:
+                issues.append(("warning", "\u4e8c\u7ef4\u7801\u6e05\u6670\u5ea6\u504f\u4f4e"))
+
+            # 4c) 乱码校对：QR 解码 + 定位方块完整性
+            qr_big = cv2.resize(pre_qr_rgb, (pre_qr_rgb.shape[1] * 2, pre_qr_rgb.shape[0] * 2),
+                                interpolation=cv2.INTER_LANCZOS4)
             detector = cv2.QRCodeDetector()
-            data, _, _ = detector.detectAndDecode(qr_arr)
-            if not data:
-                issues.append(("error", "二维码可能存在乱码或不可识别"))
+            data, det_pts, _ = detector.detectAndDecode(qr_big)
+            if data:
+                issues.append(("success", "\u4e8c\u7ef4\u7801\u53ef\u6b63\u5e38\u89e3\u7801\uff0c\u65e0\u4e71\u7801"))
+            else:
+                if det_pts is not None:
+                    issues.append(("warning", "\u4e8c\u7ef4\u7801\u5b9a\u4f4d\u6846\u53ef\u68c0\u6d4b\u4f46\u89e3\u7801\u5931\u8d25\uff0c\u5efa\u8bae\u624b\u673a\u626b\u7801\u786e\u8ba4"))
+                else:
+                    issues.append(("error", "\u4e8c\u7ef4\u7801\u5b9a\u4f4d\u6846\u672a\u68c0\u6d4b\u5230\uff0c\u53ef\u80fd\u5b58\u5728\u4e25\u91cd\u4e71\u7801\u6216\u88c1\u5207"))
         except Exception:
-            issues.append(("warning", "二维码细节检查失败，请人工扫码复核"))
+            issues.append(("warning", "\u4e8c\u7ef4\u7801\u8be6\u7ec6\u68c0\u67e5\u5931\u8d25\uff0c\u8bf7\u4eba\u5de5\u626b\u7801\u590d\u6838"))
 
     # 6) 图片是否乱码（全图异常波动）
     try:

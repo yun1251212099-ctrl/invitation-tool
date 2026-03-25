@@ -6,4 +6,4 @@ numpy
 openpyxl
 xlrd
 opencv-python-headless
-pilmoji
+pilmoji==2.0.5

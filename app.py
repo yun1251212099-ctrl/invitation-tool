@@ -13,8 +13,12 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
-from pilmoji import Pilmoji
 from psd_tools import PSDImage
+
+try:
+    from pilmoji import Pilmoji
+except Exception:
+    Pilmoji = None
 
 APP_DIR = Path(__file__).parent
 FONTS_DIR = APP_DIR / "fonts"
@@ -376,23 +380,30 @@ def draw_centered_text(draw, font, text, center_y, img_width, color, stroke_widt
 
 def _draw_centered_emoji(img, font, text, center_y, img_width, color, stroke_width=0):
     """Draw text with emoji support using pilmoji."""
+    if Pilmoji is None:
+        draw_centered_text(ImageDraw.Draw(img), font, text, center_y, img_width, color, stroke_width=stroke_width)
+        return
+
     bbox = font.getbbox(text)
     text_w = bbox[2] - bbox[0]
     x = (img_width - text_w) // 2
     y = center_y - (bbox[1] + bbox[3]) // 2
-    with Pilmoji(img) as pmj:
-        if stroke_width > 0:
-            pmj.text((x, y), text, font=font, fill=color,
-                     stroke_width=stroke_width, stroke_fill=color)
-        else:
-            pmj.text((x, y), text, font=font, fill=color)
+    try:
+        with Pilmoji(img) as pmj:
+            if stroke_width > 0:
+                pmj.text((x, y), text, font=font, fill=color,
+                         stroke_width=stroke_width, stroke_fill=color)
+            else:
+                pmj.text((x, y), text, font=font, fill=color)
+    except Exception:
+        draw_centered_text(ImageDraw.Draw(img), font, text, center_y, img_width, color, stroke_width=stroke_width)
 
 
 def generate_one(background, text_items, img_width, color, font_path):
     """text_items: list of (text_str, center_y, font_size[, stroke_width])."""
     img = background.copy()
     draw = ImageDraw.Draw(img)
-    use_emoji = any(_has_emoji(item[0]) for item in text_items if item[0])
+    use_emoji = Pilmoji is not None and any(_has_emoji(item[0]) for item in text_items if item[0])
     for item in text_items:
         text, cy, fsize = item[0], item[1], item[2]
         sw = item[3] if len(item) > 3 else 0
